@@ -4,6 +4,44 @@ import sql from "mssql";
 import { getConnectionById, makeMssqlConfig } from "../db/connections.js";
 
 async function runFixOfflineUpdates() {
+
+/*/ 🔥 PASO 0: APAGADO MASIVO PARA LOCALES KIOSKO
+console.log("⛔ Apagando artículos en locales KIOSKO");
+
+const conexionesKiosko = await mgmtDb("connections")
+  .where("kiosko", true)
+  .select("*");
+
+if (!conexionesKiosko.length) {
+  console.log("ℹ️ No hay conexiones con kiosko activo");
+} else {
+  console.log(`🏪 ${conexionesKiosko.length} locales con kiosko activo`);
+}
+
+for (const connRow of conexionesKiosko) {
+  try {
+    const config = makeMssqlConfig(connRow.host);
+    const pool = await sql.connect(config);
+
+    await pool.request().query(`
+      UPDATE articulo
+      SET Web = 0
+      WHERE codigo IN (1784, 1887)
+    `);
+
+    await pool.close();
+
+    console.log(`✅ Artículos apagados en local ${connRow.codLocal}`);
+
+  } catch (err) {
+    console.log(
+      `❌ No se pudo apagar artículos en local ${connRow.codLocal}`,
+      err.message
+    );
+  }
+}*/
+
+
   console.log("🛠️ Iniciando tarea automática de reparación de Web...");
 
   try {
@@ -101,7 +139,7 @@ async function runFixOfflineUpdates() {
 }
 
 // 🕒 Programar: todos los días 10:35 AM
-cron.schedule("30 10 * * *", runFixOfflineUpdates);
+cron.schedule("43 10 * * *", runFixOfflineUpdates);
 
 if (process.env.RUN_FIX_NOW === "true") {
   console.log("🚀 Ejecutando reparación manual inmediata...");

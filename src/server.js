@@ -13,6 +13,7 @@ import queryRouter from "./routes/query.js";
 import logsRouter from "./routes/logs.js";
 import usersRouter from "./routes/users.js";
 import reportsRouter from "./routes/reports.js";
+import menuLocalesRouter from "./routes/menuLocales.js";
 
 //import startDailyAlert from "./jobs/dailyAlert.js";
 import "./jobs/fixOfflineUpdatesJob.js";
@@ -52,7 +53,7 @@ app.use("/auth", authRouter);
 
 // ✅ SPA fallback (debe ir al final, después de todas las rutas)
 if (serveFrontend) {
-  app.get(/^(?!\/(auth|connections|query|logs|users|reports)).*/, (req, res, next) => {
+  app.get(/^(?!\/(auth|connections|query|logs|users|reports|menu-locales)).*/, (req, res, next) => {
     // Excluir rutas API del backend
     if (
       req.originalUrl.startsWith("/auth") ||
@@ -60,7 +61,8 @@ if (serveFrontend) {
       req.originalUrl.startsWith("/query") ||
       req.originalUrl.startsWith("/logs") ||
       req.originalUrl.startsWith("/users") ||
-      req.originalUrl.startsWith("/reports")
+      req.originalUrl.startsWith("/reports")||
+      req.originalUrl.startsWith("/menu-locales")
     ) {
       return next();
     }
@@ -77,6 +79,7 @@ app.use("/query", queryRouter);
 app.use("/logs", logsRouter);
 app.use("/users", usersRouter);
 app.use("/reports", reportsRouter);
+app.use("/menu-locales", menuLocalesRouter);
 
 
 

@@ -14,7 +14,7 @@ export const requireAuth = (req, res, next) => {
     const secret = process.env.JWT_SECRET || "clave_super_segura";
 
     const decoded = jwt.verify(token, secret);
-
+    
     // Guardamos los datos del usuario en el request
     req.user = decoded;
 
