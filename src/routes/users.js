@@ -89,4 +89,21 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+// Obtener locales sin zonal asignado
+router.get("/sinzonal", async (req, res) => {
+  console.log("consultando...");
+  
+  try {
+    const result = await mgmtDb("connections")
+      .select("codLocal", "name")
+      .whereNull("zonal");
+    log("Locales sin zonal:", result);
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error obteniendo locales' });
+  }
+});
+
+
 export default router;

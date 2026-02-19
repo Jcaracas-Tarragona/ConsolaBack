@@ -14,6 +14,12 @@ import logsRouter from "./routes/logs.js";
 import usersRouter from "./routes/users.js";
 import reportsRouter from "./routes/reports.js";
 import menuLocalesRouter from "./routes/menuLocales.js";
+import articulosRouter from "./routes/articulos.js";
+import horariosBaseRouter from "./routes/HorariosBase.js";
+import horariosEspecialesRouter from "./routes/horariosEspeciales.js";
+import zendeskRouter from "./routes/zendesk.js";
+import ventasRouter from "./routes/ventas.js";
+
 
 //import startDailyAlert from "./jobs/dailyAlert.js";
 import "./jobs/fixOfflineUpdatesJob.js";
@@ -49,11 +55,12 @@ if (serveFrontend) {
 }
 
 // Public routes
+app.use("/zendesk", zendeskRouter);
 app.use("/auth", authRouter);
 
 // ✅ SPA fallback (debe ir al final, después de todas las rutas)
 if (serveFrontend) {
-  app.get(/^(?!\/(auth|connections|query|logs|users|reports|menu-locales)).*/, (req, res, next) => {
+  app.get(/^(?!\/(auth|connections|query|logs|users|reports|menu-locales|articulos|horarios-base|horarios-especiales|zendesk|ventas)).*/, (req, res, next) => {
     // Excluir rutas API del backend
     if (
       req.originalUrl.startsWith("/auth") ||
@@ -62,7 +69,12 @@ if (serveFrontend) {
       req.originalUrl.startsWith("/logs") ||
       req.originalUrl.startsWith("/users") ||
       req.originalUrl.startsWith("/reports")||
-      req.originalUrl.startsWith("/menu-locales")
+      req.originalUrl.startsWith("/menu-locales") ||
+      req.originalUrl.startsWith("/articulos") ||
+      req.originalUrl.startsWith("/horarios-base") ||
+      req.originalUrl.startsWith("/horarios-especiales") ||
+      req.originalUrl.startsWith("/zendesk") ||
+      req.originalUrl.startsWith("/ventas")
     ) {
       return next();
     }
@@ -80,6 +92,11 @@ app.use("/logs", logsRouter);
 app.use("/users", usersRouter);
 app.use("/reports", reportsRouter);
 app.use("/menu-locales", menuLocalesRouter);
+app.use("/articulos", articulosRouter);
+app.use("/horarios-base", horariosBaseRouter);
+app.use("/horarios-especiales", horariosEspecialesRouter);
+app.use("/ventas", ventasRouter);
+
 
 
 

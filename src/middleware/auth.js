@@ -17,6 +17,7 @@ export const requireAuth = (req, res, next) => {
     
     // Guardamos los datos del usuario en el request
     req.user = decoded;
+    
 
     next();
   } catch (err) {

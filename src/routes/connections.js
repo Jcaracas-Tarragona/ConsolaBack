@@ -10,6 +10,31 @@ const router = express.Router();
 
 router.use(requireAuth);
 
+// Obtener locales sin zonal asignado
+router.get("/zonal/id/:userId",  async (req, res) => {
+  try {
+    const result = await mgmtDb("connections")
+      .select("codLocal", "name","zonal")
+      .where(function () {
+        this.whereNull("zonal")
+            .orWhere("zonal", req.params.userId);
+      })
+      .orderBy("name");
+
+    // normalizar salida
+    const data = result.map(l => ({
+      codLocal: l.codLocal,
+      name: l.name,
+      asignado: l.zonal === Number(req.params.userId)
+    }));
+
+    res.json(data);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error obteniendo locales' });
+  }
+});
+
 // listar conexiones
 router.get("/", async (req, res) => {
   const conns = await mgmtDb("connections").select("id","name","host","created_by","created_at","codLocal");
@@ -111,7 +136,6 @@ router.get("/test/:id", async (req, res) => {
       message: `Conexión a (${connConfig.host}) OK ✅`,
     });
   } catch (err) {
-    console.error("❌ Error al conectar a BD externa:", err);
     res.status(500).json({
       success: false,
       message: `Error al conectar con la BD externa: ${err.message}`,
@@ -138,5 +162,35 @@ router.get("/by-codlocal/:codLocal",  async (req, res) => {
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
+
+
+
+// routes/zonales.js
+router.post("/asignar-locales", async (req, res) => {
+  const { userId, codLocales } = req.body;
+
+  if (!userId || !Array.isArray(codLocales) || codLocales.length === 0) {
+    return res.status(400).json({ message: 'Datos inválidos' });
+  }
+  
+
+  try {
+    await mgmtDb.transaction(async trx => {
+
+      // desasignar todos los que tenía ese zonal
+      await trx("connections").where("zonal", userId).update({ zonal: null });
+
+      // asignar los seleccionados
+      if (codLocales.length > 0) {
+        await trx("connections").whereIn("codLocal", codLocales).update({ zonal: userId });
+      }
+    });
+    res.json({ message: 'Locales asignados correctamente' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error asignando locales' });
+  }
+});
+
 
 export default router;

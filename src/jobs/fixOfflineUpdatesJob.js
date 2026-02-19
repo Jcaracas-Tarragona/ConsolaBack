@@ -26,7 +26,7 @@ for (const connRow of conexionesKiosko) {
     await pool.request().query(`
       UPDATE articulo
       SET Web = 0
-      WHERE codigo IN (1784, 1887)
+      WHERE codigo IN (2088,2089,2090,2091,2082,2083)
     `);
 
     await pool.close();
@@ -39,7 +39,7 @@ for (const connRow of conexionesKiosko) {
       err.message
     );
   }
-}*/
+}/*/
 
 
   console.log("🛠️ Iniciando tarea automática de reparación de Web...");
@@ -50,6 +50,15 @@ for (const connRow of conexionesKiosko) {
       .where("requiereCorreccion", true)
       .andWhere("corregido", false)
       .select("*");
+
+    const desactivar = await mgmtDb("local_horarios_especiales")
+      .where("activo", true)
+      .andWhere("fecha", "<", mgmtDb.fn.now())
+      .update({ activo: false });
+
+    if (desactivar) {
+      console.log(`🔕 Desactivados ${desactivar} horarios especiales caducados`);
+    }
 
     if (!pendientes.length) {
       console.log("✅ No hay artículos pendientes de corrección");
@@ -139,7 +148,7 @@ for (const connRow of conexionesKiosko) {
 }
 
 // 🕒 Programar: todos los días 10:35 AM
-cron.schedule("43 10 * * *", runFixOfflineUpdates);
+cron.schedule("58 09 * * *", runFixOfflineUpdates);
 
 if (process.env.RUN_FIX_NOW === "true") {
   console.log("🚀 Ejecutando reparación manual inmediata...");
