@@ -71,76 +71,213 @@ router.get("/incidence-by-day", async (req, res) => {
  * Exporta el mismo reporte a Excel
  */
 router.get("/export", async (req, res) => {
-  try {
+
     const { dateFrom, dateTo } = parseDateRange(req.query);
-    const type = req.query.type || "locales";
+   try {
 
-    let rows = [];
+    const logs = await mgmtDb("logs")
+      .select(
+        mgmtDb.raw("to_char(created_at, 'YYYY-MM-DD') as fecha"),
+        "codLocal",
+        "nombre_articulo"
+      )
+      .count("* as veces")
+      .where({
+        valorNuevo: false,
+        requiereCorreccion: true
+      })
+      .whereBetween("created_at", [dateFrom, dateTo])
+      .groupByRaw("to_char(created_at, 'YYYY-MM-DD'), \"codLocal\", \"nombre_articulo\"")
+      .orderBy(["codLocal","fecha"]);
 
-    if (type === "by_grouped") {
-      rows = await mgmtDb("logs as l")
-        .select(
-          mgmtDb.raw(`date_trunc('day', l."created_at") as fecha`),
-          mgmtDb.raw(`l."codLocal"`),
-          mgmtDb.raw(`c."name" as "localName"`),
-          mgmtDb.raw(`string_agg(distinct l."articuloCodigo"::text, ', ') as articulos`),
-          mgmtDb.raw(`count(distinct l."articuloCodigo") as total_articulos`)
-        )
-        .leftJoin(
-          "connections as c",
-          mgmtDb.raw('CAST(c."codLocal" AS TEXT)'),
-          "=",
-          mgmtDb.raw('l."codLocal"')
-        )
-        .whereBetween("l.created_at", [dateFrom, dateTo])
-        .andWhere("l.valorNuevo", false)
-        .groupByRaw(`1, 2, 3`)
-        .orderByRaw(`1 asc, 2 asc`);
+    const connections = await mgmtDb("connections")
+      .select("codLocal","name");
 
-    } else {
-      return res.status(400).json({ success: false, message: "Tipo de export no soportado" });
-    }
+    const mapLocales = {};
+    connections.forEach(c=>{
+      mapLocales[c.codLocal] = c.name;
+    });
 
-    // Crear archivo Excel
     const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet("Reporte agrupado");
+    const sheet = workbook.addWorksheet("Artículos Agotados");
 
+    // ancho columnas
     sheet.columns = [
-      { header: "Fecha", key: "fecha", width: 15 },
-      { header: "CodLocal", key: "codLocal", width: 15 },
-      { header: "Local", key: "localName", width: 30 },
-      { header: "Artículos OFF", key: "articulos", width: 60 },
-      { header: "Total OFF", key: "total_articulos", width: 12 },
+      { header:"Local", key:"local", width:25 },
+      { header:"Fecha", key:"fecha", width:15 },
+      { header:"Artículo", key:"articulo", width:45 },
+      { header:"Veces", key:"veces", width:10 }
     ];
 
-    rows.forEach((r) =>
-      sheet.addRow({
-        fecha: new Date(r.fecha).toISOString().slice(0, 10),
-        codLocal: r.codLocal,
-        localName: r.localName || "(sin nombre)",
-        articulos: r.articulos,
-        total_articulos: r.total_articulos,
-      })
-    );
+    // título
+    sheet.mergeCells("A1:D1");
+    sheet.getCell("A1").value = "REPORTE DE ARTÍCULOS AGOTADOS";
+    sheet.getCell("A1").font = { size:16, bold:true };
+    sheet.getCell("A1").alignment = { horizontal:"center" };
 
-    sheet.getRow(1).font = { bold: true };
+    // rango fechas
+    sheet.mergeCells("A2:D2");
+    sheet.getCell("A2").value = `Rango de fechas: ${new Date(dateFrom).toLocaleDateString()} a ${new Date(dateTo).toLocaleDateString()}`;
+    sheet.getCell("A2").alignment = { horizontal:"center" };
 
-    const fileName = `reporte_OFF_agrupado_${dateFrom.toISOString().slice(0, 10)}_a_${dateTo
-      .toISOString()
-      .slice(0, 10)}.xlsx`;
+    sheet.addRow([]);
+
+    // encabezados
+    const header = sheet.addRow(["Local","Fecha","Artículo","Veces"]);
+
+    header.font = { bold:true };
+    header.alignment = { horizontal:"center" };
+
+    header.eachCell(cell=>{
+      cell.fill = {
+        type:"pattern",
+        pattern:"solid",
+        fgColor:{ argb:"FFBDD7EE" }
+      };
+
+      cell.border = {
+        top:{style:"thin"},
+        bottom:{style:"thin"},
+        left:{style:"thin"},
+        right:{style:"thin"}
+      };
+    });
+
+    // congelar encabezado
+    sheet.views = [{ state:"frozen", ySplit:4 }];
+
+    let currentLocal = null;
+
+    logs.forEach(row=>{
+
+      const local = mapLocales[row.codLocal] || row.codLocal;
+
+      const fila = sheet.addRow({
+        local: currentLocal === local ? "" : local,
+        fecha: row.fecha,
+        articulo: row.nombre_articulo.trim(),
+        veces: row.veces
+      });
+
+      fila.getCell("fecha").numFmt = "yyyy-mm-dd";
+
+      currentLocal = local;
+
+    });
+
+    // bordes tabla
+    sheet.eachRow((row, rowNumber)=>{
+
+      if(rowNumber < 5) return;
+
+      row.eachCell(cell=>{
+        cell.border = {
+          top:{style:"thin"},
+          bottom:{style:"thin"},
+          left:{style:"thin"},
+          right:{style:"thin"}
+        };
+      });
+
+    });
 
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=articulos_agotados_${dateFrom}_${dateTo}.xlsx`
+    );
 
     await workbook.xlsx.write(res);
+
     res.end();
-  } catch (err) {
-    console.error("GET /reports/export error:", err);
-    res.status(500).json({ success: false, message: "Error exportando reporte" });
+
+  } catch(err){
+
+    console.error(err);
+
+    res.status(500).json({
+      success:false,
+      message:err.message
+    });
+
   }
+});
+
+router.get("/agotados-resumen", async (req, res) => {
+  const { dateFrom, dateTo } = parseDateRange(req.query);
+    
+  const { fechaInicio, fechaFin } = req.query;
+
+  if (!dateFrom || !dateTo) {
+    return res.status(400).json({
+      success: false,
+      message: "Debe indicar fechaInicio y fechaFin"
+    });
+  }
+
+  try {
+    // 1️⃣ obtener resumen de logs
+    const logs = await mgmtDb("logs")
+      .select(mgmtDb.raw("to_char(created_at, 'YYYY-MM-DD') as fecha"), "codLocal", "articuloCodigo", "nombre_articulo")
+      .count("* as veces")
+      .where({
+        valorNuevo: false,
+        requiereCorreccion: true
+      })
+      .whereBetween("created_at", [dateFrom, dateTo])
+      .groupByRaw("to_char(created_at, 'YYYY-MM-DD'), \"codLocal\",\"articuloCodigo\",\"nombre_articulo\"")
+      .orderBy([
+        { column: "fecha", order: "asc" },
+        { column: "codLocal", order: "asc" }
+      ]);
+
+    // 2️⃣ obtener conexiones (nombre del local)
+    const connections = await mgmtDb("connections")
+      .select("codLocal", "name");
+
+    const connMap = {};
+    connections.forEach(c => {
+      connMap[c.codLocal] = c.name;
+    });
+
+    // 3️⃣ agrupar por local
+    const resultado = {};
+
+    for (const row of logs) {
+      const local = connMap[row.codLocal] || row.codLocal;
+      if (!resultado[local]) {
+        resultado[local] = [];
+      }
+
+      resultado[local].push({
+        articuloCodigo: row.articuloCodigo,
+        veces: row.veces,
+        nombre_articulo: row.nombre_articulo,
+        fecha: row.fecha
+      });
+
+    }
+
+    res.json({
+      success: true,
+      data: resultado
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+
+  }
+
 });
 
 export default router;

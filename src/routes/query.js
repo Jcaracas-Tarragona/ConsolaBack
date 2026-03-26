@@ -93,7 +93,7 @@ router.get("/articulos/:connectionId", async (req, res) => {
  * Body: { connectionId, codigo }  -> togglea el campo Web (0/1) para artículo con Codigo y Rubro=18
  */
 router.post("/toggle-web", async (req, res) => {
-    const { connectionId, codigo, username, codLocal } = req.body;
+    const { connectionId, codigo, username, codLocal, nombreArticulo } = req.body;
 
     if (!connectionId || !codigo || !username || !codLocal) {
       return res.status(400).json({ success: false, message: "connectionId, codigo, username y codLocal son requeridos" });
@@ -140,6 +140,7 @@ router.post("/toggle-web", async (req, res) => {
     await mgmtDb("logs").insert({
         username,
         codLocal,
+        nombre_articulo: nombreArticulo, 
         articuloCodigo: codigo,
         campo: "Web",
         valorNuevo: newWeb,

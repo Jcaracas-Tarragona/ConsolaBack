@@ -7,7 +7,7 @@ const router = express.Router();
 
 router.use(requireAuth);
 
-router.get("/",allowRoles("Admin", "Comercial"), async (req, res) => {
+router.get("/",allowRoles("Admin", "Comercial", "Zonal"), async (req, res) => {
     try {
       const rows = await mgmtDb("local_horarios_especiales as he")
         .join("connections as c", "c.codLocal", "he.codlocal")
@@ -47,7 +47,7 @@ router.get("/",allowRoles("Admin", "Comercial"), async (req, res) => {
   }
 );
 
-router.get("/he/:codlocal",allowRoles("Admin", "Comercial"), async (req, res) => {
+router.get("/he/:codlocal",allowRoles("Admin", "Comercial", "Zonal"), async (req, res) => {
     const { codlocal } = req.params;
     try {
       const rows = await mgmtDb("local_horarios_especiales as he")
@@ -87,7 +87,7 @@ router.get("/he/:codlocal",allowRoles("Admin", "Comercial"), async (req, res) =>
   }
 );
 
-router.post("/",allowRoles("Admin", "Comercial"),async (req, res) => {
+router.post("/",allowRoles("Admin", "Comercial", "Zonal"),async (req, res) => {
 
     const {codlocal,fecha,hora_apertura,hora_cierre,cerrado,motivo} = req.body;
 

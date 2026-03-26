@@ -12,20 +12,27 @@ const router = express.Router();
 
 router.use(requireAuth);
 
-router.get("/ventas-diarias", allowRoles("Admin"), async (req, res) => {
+router.get("/ventas-diarias", allowRoles("Admin","Zonal","Comercial"), async (req, res) => {
+
   try {
 
-    /* =========================
-       1️⃣ OBTENER LOCALES
-    ========================== */
-    const connections = await mgmtDb("connections")
+    const user = req.user; // viene del middleware de autenticación
+
+    /* 1️⃣ OBTENER LOCALES */
+
+    let connectionsQuery = mgmtDb("connections")
       .select("name", "host", "codLocal");
 
-    /* =========================
-       2️⃣ CONSULTA CENTRAL (UNA SOLA VEZ)
-    ========================== */
-    const poolCentral = await getCentralPool();
+    // Si es zonal filtrar por su usuario
+    if (user.role === "Zonal") {
+      connectionsQuery = connectionsQuery.where("zonal", user.id);
+    }
 
+    const connections = await connectionsQuery;
+
+    /* 2️⃣ CONSULTA CENTRAL (UNA SOLA VEZ) */
+
+    const poolCentral = await getCentralPool();
     const centralResult = await poolCentral
       .request()
       .query(`
@@ -39,7 +46,6 @@ router.get("/ventas-diarias", allowRoles("Admin"), async (req, res) => {
         GROUP BY Local
       `);
 
-    // Convertimos en mapa para búsqueda rápida
     const centralMap = new Map();
 
     centralResult.recordset.forEach(r => {
@@ -51,19 +57,14 @@ router.get("/ventas-diarias", allowRoles("Admin"), async (req, res) => {
 
     const resultado = [];
 
-    /* =========================
-       3️⃣ ITERAR POR CADA LOCAL
-    ========================== */
-    for (const c of connections) {
+    /* 3️⃣ ITERAR POR CADA LOCAL*/
 
+    for (const c of connections) {
       let localTotal = 0;
       let localCantidad = 0;
-
       const config = makeMssqlConfig(c.host);
-
       try {
         const localPool = await sql.connect(config);
-
         const r = await localPool
           .request()
           .query(`
@@ -77,16 +78,15 @@ router.get("/ventas-diarias", allowRoles("Admin"), async (req, res) => {
 
         localCantidad = r.recordset[0].cantidad;
         localTotal = r.recordset[0].total;
-
         await localPool.close();
-
       } catch (err) {
+
         console.error(`❌ Error local ${c.codLocal}:`, err.message);
+
       }
 
-      /* =========================
-         4️⃣ OBTENER DATA CENTRAL DESDE MAP
-      ========================== */
+      /* 4️⃣ OBTENER DATA CENTRAL */
+
       const centralData = centralMap.get(c.codLocal) || {
         cantidad: 0,
         total: 0
@@ -110,9 +110,93 @@ router.get("/ventas-diarias", allowRoles("Admin"), async (req, res) => {
     res.json(resultado);
 
   } catch (error) {
+
     console.error(error);
-    res.status(500).json({ message: "Error conciliando ventas" });
+
+    res.status(500).json({
+      message: "Error conciliando ventas"
+    });
+
+  }
+
+});
+
+
+router.get("/estado-horario", allowRoles("Admin"), async (req, res) => {
+
+  try {
+    /* CONEXIÓN CENTRAL */
+    const pool = await getCentralPool();
+
+    /* CONSULTA AGRUPADA */
+    const result = await pool.request().query(`
+      SELECT   e.Local, l.Nom_local AS nombreLocal,
+        -- Última fecha/hora como TEXTO (evita desfase)
+            CONVERT(varchar(19),
+                MAX(
+                    DATEADD(SECOND,
+                        DATEDIFF(SECOND,'00:00:00',e.hora),
+                        CAST(e.fecha AS DATETIME)
+                    )
+                ),
+            120) AS ultimaFecha,
+            -- Diferencia en minutos
+            DATEDIFF(
+                MINUTE,
+                MAX(
+                    DATEADD(SECOND,
+                        DATEDIFF(SECOND,'00:00:00',e.hora),
+                        CAST(e.fecha AS DATETIME)
+                    )
+                ),
+                GETDATE()
+            ) AS minutos,
+            CASE
+                -- No hay ventas hoy
+                WHEN MAX(e.fecha) < CAST(GETDATE() AS DATE)
+                    THEN 'Sin ventas hoy'
+                -- En horario
+                WHEN DATEDIFF(
+                    MINUTE,
+                    MAX(
+                        DATEADD(SECOND,
+                            DATEDIFF(SECOND,'00:00:00',e.hora),
+                            CAST(e.fecha AS DATETIME)
+                        )
+                    ),
+                    GETDATE()
+                ) <= 10
+                    THEN 'En horario'
+                -- Demora leve
+                WHEN DATEDIFF(
+                    MINUTE,
+                    MAX(
+                        DATEADD(SECOND,
+                            DATEDIFF(SECOND,'00:00:00',e.hora),
+                            CAST(e.fecha AS DATETIME)
+                        )
+                    ),
+                    GETDATE()
+                ) BETWEEN 11 AND 59
+                    THEN 'Demora leve'
+                -- Critica
+                ELSE 'Critica'
+            END AS estado
+        FROM emitidos e
+        LEFT JOIN locales l ON e.Local = l.Num_local
+        WHERE e.anulado = 0
+        GROUP BY e.Local, l.Nom_local
+        ORDER BY e.Local;
+    `);
+    
+    res.json(result.recordset);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      message:"Error consultando horarios"
+    });
   }
 });
+
 
 export default router;

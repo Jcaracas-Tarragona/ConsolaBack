@@ -12,45 +12,56 @@ router.use(requireAuth);
  * GET /horarios-base
  * Agrupa días con mismo horario por local
  */
-router.get("/",allowRoles("Admin", "Comercial", "Zonal"),async (req, res) => {
+router.get(
+  "/",
+  allowRoles("Admin", "Comercial", "Zonal"),
+  async (req, res) => {
     try {
+
       const { page = 1, limit = 10, search } = req.query;
+
       const offset = (page - 1) * limit;
+
+      const userId = req.user.id;
+      const role = req.user.role;
 
       /* ===============================
          QUERY BASE
       =============================== */
-      let query = `
-        SELECT
-          h.codlocal,
-          c.name AS local_nombre,
-          h.dia_semana,
-          h.hora_apertura,
-          h.hora_cierre,
-          h.activo,
-          h.cerrado
-        FROM local_horarios_base h
-        JOIN connections c ON c."codLocal" = h.codlocal
-      `;
+
+      let query = `SELECT h.codlocal, c.name AS local_nombre, h.dia_semana, h.hora_apertura,
+          h.hora_cierre, h.activo, h.cerrado 
+          FROM local_horarios_base h
+        JOIN connections c ON c."codLocal" = h.codlocal`;
 
       const params = [];
+      const where = [];
 
+      /* FILTRO ZONAL */
+      if (role === "Zonal") {
+        where.push(`c.zonal = ?`);
+        params.push(userId);
+      }
+
+      /* BUSCADOR*/
       if (search) {
-        query += ` WHERE LOWER(c.name) LIKE LOWER(?) `;
+        where.push(`LOWER(c.name) LIKE LOWER(?)`);
         params.push(`%${search}%`);
       }
 
-      query += `
-        ORDER BY c.name, h.hora_apertura, h.dia_semana
-      `;
+      /* ARMAR WHERE */
+      if (where.length > 0) {
+        query += " WHERE " + where.join(" AND ");
+      }
+
+      query += ` ORDER BY c.name, h.hora_apertura, h.dia_semana`;
 
       const result = await mgmtDb.raw(query, params);
-      const rows = result.rows;
-      
 
-      /* ===============================
-         MAPA DÍAS
-      =============================== */
+      const rows = result.rows;
+
+      /* MAPA DÍAS */
+
       const diasMap = {
         1: "Lun",
         2: "Mar",
@@ -61,13 +72,10 @@ router.get("/",allowRoles("Admin", "Comercial", "Zonal"),async (req, res) => {
         7: "Dom",
       };
 
-      /* ===============================
-         AGRUPACIÓN FINAL
-         ➜ 1 REGISTRO POR LOCAL
-      =============================== */
+      /*AGRUPACIÓN */
       const agrupado = {};
-
       rows.forEach((r) => {
+
         if (!agrupado[r.codlocal]) {
           agrupado[r.codlocal] = {
             codlocal: r.codlocal,
@@ -76,50 +84,73 @@ router.get("/",allowRoles("Admin", "Comercial", "Zonal"),async (req, res) => {
           };
         }
 
-        const keyBloque = `${r.hora_apertura}-${r.hora_cierre}-${r.activo}`;
+        const keyBloque =
+          `${r.hora_apertura}-${r.hora_cierre}-${r.activo}`;
 
         if (!agrupado[r.codlocal].bloques[keyBloque]) {
           agrupado[r.codlocal].bloques[keyBloque] = {
             dias: [],
-            hora_apertura: r.cerrado ? null : r.hora_apertura.slice(0, 5),
-            hora_cierre: r.cerrado ? null : r.hora_cierre.slice(0, 5),
+            hora_apertura:
+              r.cerrado
+                ? null
+                : r.hora_apertura.slice(0, 5),
+            hora_cierre:
+              r.cerrado
+                ? null
+                : r.hora_cierre.slice(0, 5),
             activo: r.activo,
             cerrado: r.cerrado
           };
         }
+        agrupado[r.codlocal]
+          .bloques[keyBloque]
+          .dias.push(
+            diasMap[r.dia_semana]
+          );
 
-        agrupado[r.codlocal].bloques[keyBloque].dias.push(
-          diasMap[r.dia_semana]
-        );
       });
 
-      /* ===============================
-         FORMATO RESPUESTA
-      =============================== */
-      const items = Object.values(agrupado).map((local) => ({
-        codlocal: local.codlocal,
-        local_nombre: local.local_nombre,
-        horarios: Object.values(local.bloques).map((b) => ({
-          dias: b.dias.join(" - "),
-          horario: `${b.hora_apertura} - ${b.hora_cierre}`,
-          activo: b.activo,
-          cerrado: b.cerrado
-        })),
-      }));
+      /* RESPUESTA*/
+      const items = Object.values(agrupado)
+        .map((local) => ({
+          codlocal: local.codlocal,
+          local_nombre: local.local_nombre,
+          horarios: Object.values(local.bloques)
+            .map((b) => ({
+              dias: b.dias.join(" - "),
+              horario:
+                `${b.hora_apertura} - ${b.hora_cierre}`,
+              activo: b.activo,
+              cerrado: b.cerrado
+            }))
+        }));
 
-      const paginatedItems = items.slice(offset, offset + Number(limit));
+      const paginatedItems =
+        items.slice(
+          offset,
+          offset + Number(limit)
+        );
 
       res.json({
+
         items: paginatedItems,
-        total: items.length,
+
+        total: items.length
+
       });
 
     } catch (err) {
+
       console.error("❌ Error horarios base:", err);
-      res.status(500).json({ error: "Error obteniendo horarios base" });
+
+      res.status(500).json({
+        error: "Error obteniendo horarios base"
+      });
+
     }
   }
 );
+
 
 
 /**
@@ -158,7 +189,7 @@ router.post("/", allowRoles("Admin", "Comercial", "Zonal"), async (req, res) => 
 });
 
 
-router.post("/bulk", allowRoles("Admin"), async (req, res) => {
+router.post("/bulk", allowRoles("Admin","Zonal"), async (req, res) => {
   try {
     let {
       dias,
@@ -224,7 +255,7 @@ router.post("/bulk", allowRoles("Admin"), async (req, res) => {
 /**
  * PATCH → Activar / desactivar
  */
-router.patch("/:id/estado", allowRoles("Admin"), async (req, res) => {
+router.patch("/:id/estado", allowRoles("Admin", "Zonal"), async (req, res) => {
   const { activo } = req.body;
 
   try {

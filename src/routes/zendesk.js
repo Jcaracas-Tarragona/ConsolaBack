@@ -7,7 +7,7 @@ const router = express.Router();
 
 const ZENDESK_DOMAIN = "https://tarragonachilesupport.zendesk.com";
 const EMAIL = "jleiva@tarragona.cl";
-const API_TOKEN = process.env.ZENDESK_API_TOKEN || ""; // usa ENV en producción
+const API_TOKEN = process.env.ZENDESK_API_TOKEN ; // usa ENV en producción
 
 function getHeaders() {
   const token = Buffer.from(`${EMAIL}/token:${API_TOKEN}`).toString("base64");

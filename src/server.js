@@ -19,6 +19,7 @@ import horariosBaseRouter from "./routes/HorariosBase.js";
 import horariosEspecialesRouter from "./routes/horariosEspeciales.js";
 import zendeskRouter from "./routes/zendesk.js";
 import ventasRouter from "./routes/ventas.js";
+import actualizacionesRouter from "./routes/actualizaciones.js";
 
 
 //import startDailyAlert from "./jobs/dailyAlert.js";
@@ -55,12 +56,13 @@ if (serveFrontend) {
 }
 
 // Public routes
+app.use("/actualizaciones", actualizacionesRouter);
 app.use("/zendesk", zendeskRouter);
 app.use("/auth", authRouter);
 
 // ✅ SPA fallback (debe ir al final, después de todas las rutas)
 if (serveFrontend) {
-  app.get(/^(?!\/(auth|connections|query|logs|users|reports|menu-locales|articulos|horarios-base|horarios-especiales|zendesk|ventas)).*/, (req, res, next) => {
+  app.get(/^(?!\/(auth|connections|query|logs|users|reports|menu-locales|articulos|horarios-base|horarios-especiales|zendesk|ventas|actualizaciones)).*/, (req, res, next) => {
     // Excluir rutas API del backend
     if (
       req.originalUrl.startsWith("/auth") ||
@@ -74,7 +76,8 @@ if (serveFrontend) {
       req.originalUrl.startsWith("/horarios-base") ||
       req.originalUrl.startsWith("/horarios-especiales") ||
       req.originalUrl.startsWith("/zendesk") ||
-      req.originalUrl.startsWith("/ventas")
+      req.originalUrl.startsWith("/ventas") ||
+      req.originalUrl.startsWith("/actualizaciones")
     ) {
       return next();
     }

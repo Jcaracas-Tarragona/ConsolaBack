@@ -37,8 +37,19 @@ router.get("/zonal/id/:userId",  async (req, res) => {
 
 // listar conexiones
 router.get("/", async (req, res) => {
-  const conns = await mgmtDb("connections").select("id","name","host","created_by","created_at","codLocal");
-  res.json(conns);
+  const userId = req.user.id;
+  const role = req.user.role;
+
+  let query = `SELECT c.id, c.name, c.host, c.created_by, c.created_at, c."codLocal" FROM connections c`;
+  const params = [];
+
+  if (role === "Zonal") {
+    query += ` WHERE c.zonal = ?`;
+    params.push(userId);
+  }
+    
+  const conns = await mgmtDb.raw(query, params);
+  res.json(conns.rows);
 });
 
 // ✅ Crear conexión
