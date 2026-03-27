@@ -103,7 +103,7 @@ app.use("/articulos", articulosRouter);
 app.use("/horarios-base", horariosBaseRouter);
 app.use("/horarios-especiales", horariosEspecialesRouter);
 app.use("/ventas", ventasRouter);
-
+app.use("/notificaciones", notificacionesRouter);
 
 
 

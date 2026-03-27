@@ -21,7 +21,7 @@ const config = {
     idleTimeoutMillis: 30000,
   },
 
-  connectionTimeout: 5000,
+  connectionTimeout: 50000,
   requestTimeout: 15000,
 };
 

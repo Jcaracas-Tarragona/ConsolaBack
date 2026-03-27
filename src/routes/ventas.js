@@ -198,7 +198,7 @@ router.get("/estado-horario", allowRoles("Admin"), async (req, res) => {
   }
 });
 
-router.get("/estado-horario/resumen", allowRoles("Admin"), async (req, res) => {
+router.get("/estado-horario/resumen",  async (req, res) => {
   try {
     const pool = await getCentralPool();
 

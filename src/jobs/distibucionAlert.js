@@ -10,7 +10,12 @@ export const initCronJobs = () => {
     console.log("⏰ Ejecutando tarea programada...");
 
    try {
-      const res = await fetch("http://localhost:3000/estado-horario/resumen");
+      const res = await fetch("http://localhost:3000/actualizaciones/estado-horario/resumen", {
+        headers: {
+            "x-api-key": process.env.API_KEY
+        }
+      });
+
       const data = await res.json();
 
       // extraer valores

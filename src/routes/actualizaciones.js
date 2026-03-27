@@ -1,5 +1,6 @@
 import express from "express";
 import mgmtDb from "../db/adminDb.js";
+import  {getCentralPool }  from "../db/dbCentral.js";
 const router = express.Router();
 
 
@@ -27,9 +28,7 @@ router.post("/", async (req, res) => {
 
   try {
 
-    /* =========================
-       VALIDAR API KEY
-    ========================== */
+    /* VALIDAR API KEY */
     const apiKey = req.headers["x-api-key"];
 
     if (apiKey !== process.env.API_KEY) {
@@ -126,6 +125,69 @@ router.get("/estado-equipos", async (req, res) => {
     console.error(err);
     res.status(500).json({
       error: "Error obteniendo estado"
+    });
+  }
+});
+
+router.get("/estado-horario/resumen", async (req, res) => {
+  /* VALIDAR API KEY */
+  const apiKey = req.headers["x-api-key"];
+
+  if (apiKey !== process.env.API_KEY) {
+    return res.status(401).json({
+      error: "No autorizado"
+    });
+  }
+  
+  try {
+    const pool = await getCentralPool();
+
+    const result = await pool.request().query(`
+      SELECT estado, COUNT(*) AS cantidad
+      FROM (
+        SELECT
+          CASE
+            WHEN MAX(e.fecha) < CAST(GETDATE() AS DATE)
+              THEN 'Sin ventas hoy'
+            WHEN DATEDIFF(
+              MINUTE,
+              MAX(
+                DATEADD(SECOND,
+                  DATEDIFF(SECOND,'00:00:00',e.hora),
+                  CAST(e.fecha AS DATETIME)
+                )
+              ),
+              GETDATE()
+            ) <= 10
+              THEN 'En horario'
+            WHEN DATEDIFF(
+              MINUTE,
+              MAX(
+                DATEADD(SECOND,
+                  DATEDIFF(SECOND,'00:00:00',e.hora),
+                  CAST(e.fecha AS DATETIME)
+                )
+              ),
+              GETDATE()
+            ) BETWEEN 11 AND 59
+              THEN 'Demora leve'
+            ELSE 'Critica'
+          END AS estado
+        FROM emitidos e
+        LEFT JOIN locales l ON e.Local = l.Num_local
+        WHERE e.anulado = 0
+        GROUP BY e.Local, l.Nom_local
+      ) AS sub
+      GROUP BY estado
+      ORDER BY estado;
+    `);
+      
+    res.json(result.recordset);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      message: "Error generando resumen de estados"
     });
   }
 });
