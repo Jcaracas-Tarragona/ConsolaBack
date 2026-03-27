@@ -198,5 +198,59 @@ router.get("/estado-horario", allowRoles("Admin"), async (req, res) => {
   }
 });
 
+router.get("/estado-horario/resumen", allowRoles("Admin"), async (req, res) => {
+  try {
+    const pool = await getCentralPool();
+
+    const result = await pool.request().query(`
+      SELECT estado, COUNT(*) AS cantidad
+      FROM (
+        SELECT
+          CASE
+            WHEN MAX(e.fecha) < CAST(GETDATE() AS DATE)
+              THEN 'Sin ventas hoy'
+            WHEN DATEDIFF(
+              MINUTE,
+              MAX(
+                DATEADD(SECOND,
+                  DATEDIFF(SECOND,'00:00:00',e.hora),
+                  CAST(e.fecha AS DATETIME)
+                )
+              ),
+              GETDATE()
+            ) <= 10
+              THEN 'En horario'
+            WHEN DATEDIFF(
+              MINUTE,
+              MAX(
+                DATEADD(SECOND,
+                  DATEDIFF(SECOND,'00:00:00',e.hora),
+                  CAST(e.fecha AS DATETIME)
+                )
+              ),
+              GETDATE()
+            ) BETWEEN 11 AND 59
+              THEN 'Demora leve'
+            ELSE 'Critica'
+          END AS estado
+        FROM emitidos e
+        LEFT JOIN locales l ON e.Local = l.Num_local
+        WHERE e.anulado = 0
+        GROUP BY e.Local, l.Nom_local
+      ) AS sub
+      GROUP BY estado
+      ORDER BY estado;
+    `);
+
+    res.json(result.recordset);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      message: "Error generando resumen de estados"
+    });
+  }
+});
+
 
 export default router;

@@ -99,7 +99,28 @@ router.get("/estado-equipos", async (req, res) => {
       ORDER BY equipo, modulo, fecha DESC
     `);
 
-    res.json(result.rows);
+    const rows = result.rows;
+
+    // 🔥 Agrupar por equipo
+    const agrupado = rows.reduce((acc, row) => {
+      if (!acc[row.equipo]) {
+        acc[row.equipo] = {
+          equipo: row.equipo,
+          modulos: []
+        };
+      }
+
+      acc[row.equipo].modulos.push({
+        modulo: row.modulo,
+        estado: row.estado,
+        fecha: row.fecha,
+        ip: row.ip
+      });
+
+      return acc;
+    }, {});
+
+    res.json(Object.values(agrupado));
 
   } catch (err) {
     console.error(err);
