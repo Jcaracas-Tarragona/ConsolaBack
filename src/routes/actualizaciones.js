@@ -1,5 +1,5 @@
 import express from "express";
-import mgmtDb from "../db/adminDb.js";
+import mgmtDb from "../db/adminDB.js";
 import  {getCentralPool }  from "../db/dbCentral.js";
 const router = express.Router();
 
@@ -189,6 +189,53 @@ router.get("/estado-horario/resumen", async (req, res) => {
     res.status(500).json({
       message: "Error generando resumen de estados"
     });
+  }
+});
+
+// Carga masiva de tickets
+router.post("/zendesks/bulk", async (req, res) => {
+
+  /* VALIDAR API KEY */
+    const apiKey = req.headers["x-api-key"];
+
+    if (apiKey !== process.env.API_KEY) {
+      return res.status(401).json({
+        error: "No autorizado"
+      });
+    }
+    
+  try {
+    const tickets = req.body;
+
+    if (!Array.isArray(tickets) || tickets.length === 0) {
+      return res.status(400).json({ error: "Array requerido" });
+    }
+
+    const data = tickets.map(t => ({
+      ticket_id: t.ticket_id,
+      zd_created_at: t.created_at,
+      zd_updated_at: t.updated_at,
+      status: t.status,
+      codigo_local: t.codigo_local,
+      tipo_ticket: t.tipo_ticket,
+      tipo_consulta: t.tipo_consulta,
+      tipo_servicio: t.tipo_servicio,
+      requerimiento_completado: t.requerimiento_completado
+    }));
+
+    await mgmtDb("zendesks")
+      .insert(data)
+      .onConflict("ticket_id")
+      .merge();
+
+    res.json({
+      ok: true,
+      total: data.length
+    });
+
+  } catch (error) {
+    console.error("ERROR BULK ZENDESK:", error);
+    res.status(500).json({ error: "Error carga masiva" });
   }
 });
 

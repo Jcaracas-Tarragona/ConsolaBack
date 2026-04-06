@@ -1,6 +1,6 @@
 // routes/logs.js
 import express from "express";
-import mgmtDb from "../db/adminDb.js";
+import mgmtDb from "../db/adminDB.js";
 import { requireAuth } from "../middleware/auth.js";
 
 const router = express.Router();

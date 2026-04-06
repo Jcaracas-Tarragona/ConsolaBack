@@ -1,5 +1,5 @@
 import express from "express";
-import mgmtDb from "../db/adminDb.js";
+import mgmtDb from "../db/adminDB.js";
 import { requireAuth } from "../middleware/auth.js";
 import { allowRoles } from "../middleware/roleMiddleware.js";
 import ExcelJS from "exceljs";
@@ -12,22 +12,15 @@ router.use(requireAuth);
  * GET /horarios-base
  * Agrupa días con mismo horario por local
  */
-router.get(
-  "/",
-  allowRoles("Admin", "Comercial", "Zonal"),
+router.get("/",allowRoles("Admin", "Comercial", "Zonal"),
   async (req, res) => {
     try {
-
       const { page = 1, limit = 10, search } = req.query;
-
       const offset = (page - 1) * limit;
-
       const userId = req.user.id;
       const role = req.user.role;
 
-      /* ===============================
-         QUERY BASE
-      =============================== */
+      /* QUERY BASE */
 
       let query = `SELECT h.codlocal, c.name AS local_nombre, h.dia_semana, h.hora_apertura,
           h.hora_cierre, h.activo, h.cerrado 
@@ -393,7 +386,8 @@ router.get("/export/excel",allowRoles("Admin", "Comercial","Zonal"),
         { header: "Fecha", key: "fecha", width: 15 },
         { header: "Horario", key: "horario", width: 20 },
         { header: "Estado", key: "estado", width: 15 },
-        { header: "Tipo Horario", key: "tipo_horario", width: 15 }
+        { header: "Tipo Horario", key: "tipo_horario", width: 15 },
+        { header: "Fecha Solicitud", key: "f_solicitud", width: 25 }
       ];
 
       horarios
@@ -411,7 +405,10 @@ router.get("/export/excel",allowRoles("Admin", "Comercial","Zonal"),
               ? "CERRADO"
               : `${h.hora_apertura.slice(0, 5)} - ${h.hora_cierre.slice(0, 5)}`,
             estado: h.activo ? "Activo" : "Inactivo",
-            tipo_horario: h.tipo_horario
+            tipo_horario: h.tipo_horario,
+            f_solicitud: h.f_solicitud  
+              ? h.f_solicitud.toISOString().replace("T", " ").slice(0, 19)
+              : ""
           });
         });
 

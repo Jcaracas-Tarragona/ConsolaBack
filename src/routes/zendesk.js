@@ -1,57 +1,87 @@
 // routes/zendesk.js
 import express from "express";
-import fetch from "node-fetch";
+import db from "../db/adminDB.js";
 
 
 const router = express.Router();
 
-const ZENDESK_DOMAIN = "https://tarragonachilesupport.zendesk.com";
-const EMAIL = "jleiva@tarragona.cl";
-const API_TOKEN = process.env.ZENDESK_API_TOKEN ; // usa ENV en producción
-
-function getHeaders() {
-  const token = Buffer.from(`${EMAIL}/token:${API_TOKEN}`).toString("base64");
-
-  return {
-    Authorization: `Basic ${token}`,
-    "Content-Type": "application/json",
-  };
-}
-
-router.get("/tickets", async (req, res) => {
-  const { desde, hasta } = req.query;
-
-  if (!desde || !hasta) {
-    return res.status(400).json({ message: "Fechas requeridas" });
-  }
-
+// Endpoint para recibir tickets desde el cliente (upsert)
+router.post("/zendesks", async (req, res) => {
   try {
-    let url =
-      `${ZENDESK_DOMAIN}/api/v2/search.json?query=` +
-      encodeURIComponent(
-        `type:ticket status:closed created>=${desde} created<=${hasta}`
-      );
+    const {
+      ticket_id,
+      created_at,
+      updated_at,
+      status,
+      codigo_local,
+      tipo_ticket,
+      tipo_consulta,
+      tipo_servicio,
+      requerimiento_completado
+    } = req.body;
 
-    const tickets = [];
-
-    while (url) {
-      const response = await fetch(url, { headers: getHeaders() });
-
-      if (!response.ok) {
-        return res.status(response.status).json(await response.json());
-      }
-
-      const data = await response.json();
-      tickets.push(...data.results);
-      url = data.next_page;
+    if (!ticket_id || !created_at || !status || !codigo_local) {
+      return res.status(400).json({ error: "Campos obligatorios faltantes" });
     }
 
-    res.json(tickets);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Error Zendesk" });
+    const data = {
+      ticket_id,
+      zd_created_at: created_at,
+      zd_updated_at: updated_at,
+      status,
+      codigo_local,
+      tipo_ticket,
+      tipo_consulta,
+      tipo_servicio,
+      requerimiento_completado
+    };
+
+    // 🔥 UPSERT (PostgreSQL)
+    const result = await db("zendesks")
+      .insert(data)
+      .onConflict("ticket_id")
+      .merge()
+      .returning("id");
+
+    res.json({ ok: true, id: result[0] });
+
+  } catch (error) {
+    console.error("ERROR ZENDESK:", error);
+    res.status(500).json({ error: "Error guardando ticket" });
   }
 });
 
+
+router.get("/local/:codigo_local", async (req, res) => {
+  try {
+    const { codigo_local } = req.params;
+    const { status, desde, hasta } = req.query;
+    const codLocal = parseInt(codigo_local);
+    
+    let query = db("zendesks").where({ codigo_local: codLocal });
+
+    // 🔍 filtro por estado
+    if (status) {
+      query = query.andWhere("status", status);
+    }
+
+    // 📅 filtro por fechas
+    if (desde) {
+      query = query.andWhere("zd_created_at", ">=", `${desde} 00:00:00`);
+    }
+
+    if (hasta) {
+      query = query.andWhere("zd_created_at", "<=", `${hasta} 23:59:59`);
+    }
+
+    const data = await query.orderBy("zd_created_at", "desc");
+    
+    res.json(data);
+
+  } catch (error) {
+    console.error("ERROR GET ZENDESK LOCAL:", error);
+    res.status(500).json({ error: "Error obteniendo tickets" });
+  }
+});
 
 export default router;
