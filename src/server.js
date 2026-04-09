@@ -26,7 +26,7 @@ import notificacionesRouter from "./routes/notificaciones.js";
 //import startDailyAlert from "./jobs/dailyAlert.js";
 import "./jobs/fixOfflineUpdatesJob.js";
 import { initCronJobs } from "./jobs/distibucionAlert.js";
-//initCronJobs();
+initCronJobs();
 
 // Create server
 const app = express();
