@@ -2,6 +2,7 @@
 import express from "express";
 import mgmtDb from "../db/adminDb.js";
 import ExcelJS from "exceljs";
+import {allowRoles} from "../middleware/roleMiddleware.js";
 
 const router = express.Router();
 
@@ -30,6 +31,89 @@ function parseDateRange(q) {
   return { dateFrom, dateTo };
 }
 
+
+
+router.get("/productosagotados",allowRoles("Admin"), async (req, res) => {
+  try {
+    let { dateFrom: desde, dateTo: hasta } =  parseDateRange(req.query);
+    let { limit } = req.query;
+    limit = parseInt(limit) || 10; 
+
+    // 🔥 VALIDACIÓN + DEFAULTS
+    const hoy = new Date().toISOString().split("T")[0];
+
+    if (!desde) desde = hoy;
+    if (!hasta) hasta = desde;
+
+    // 🔥 NORMALIZAR RANGO (hasta incluye todo el día)
+    const hastaPlus = new Date(hasta);
+    hastaPlus.setDate(hastaPlus.getDate() + 1);
+    
+    // 🔥 BASE QUERY OPTIMIZADA
+    const baseQuery = mgmtDb("logs as l")
+      .join("connections as c", function () {
+        this.on(
+          mgmtDb.raw('c."codLocal" = l."codLocal"::integer')
+        );
+      })
+      .where("l.valorNuevo", false)
+      .where("l.created_at", ">=", desde)
+      .andWhere("l.created_at", "<", hastaPlus);
+
+    // 🔥 TOP PRODUCTOS
+    const productos = await baseQuery
+      .clone()
+      .select("l.nombre_articulo as producto")
+      .count("* as cantidad")
+      .groupBy("l.nombre_articulo")
+      .orderBy("cantidad", "desc")
+      .limit(limit);
+
+    // 🔥 TOP LOCALES
+    const locales = await baseQuery
+      .clone()
+      .select("c.name as local")
+      .count("* as cantidad")
+      .groupBy("c.name")
+      .orderBy("cantidad", "desc")
+      .limit(limit);
+
+    // 🔥 DETALLE (LIMITADO para no romper frontend)
+    const detalle = await baseQuery
+      .clone()
+      .select(
+        "l.nombre_articulo as producto",
+        "c.name as local",
+        "l.created_at as fecha"
+      )
+      .orderBy("l.created_at", "desc")
+      .limit(500);
+    const dias = await baseQuery
+      .clone()
+      .select(
+        mgmtDb.raw(`
+          EXTRACT(DOW FROM l.created_at) as orden,
+          TO_CHAR(l.created_at, 'Day') as dia
+        `)
+      )
+      .count("* as cantidad")
+      .groupBy("orden", "dia")
+      .orderBy("orden");
+            
+    res.json({
+      productos,
+      locales,
+      detalle,
+      dias
+    });
+
+  } catch (error) {
+    console.error("Error reporte agotados:", error);
+    res.status(500).json({
+      error: "Error generando reporte"
+    });
+  }
+});
 
 /**
  * 📊 GET /reports/incidence-by-day
@@ -208,6 +292,7 @@ router.get("/export", async (req, res) => {
 });
 
 router.get("/agotados-resumen", async (req, res) => {
+  
   const { dateFrom, dateTo } = parseDateRange(req.query);
     
   const { fechaInicio, fechaFin } = req.query;
@@ -279,5 +364,6 @@ router.get("/agotados-resumen", async (req, res) => {
   }
 
 });
+
 
 export default router;

@@ -6,7 +6,7 @@ import db from "../db/adminDb.js"; // tu instancia de knex
 
 export const initCronJobs = () => {
   // 11:30 y 15:30
-  cron.schedule("30 11,15 * * *", async () => {
+  cron.schedule("30 13,15 * * *", async () => {
     console.log("⏰ Ejecutando tarea programada...");
 
    try {
@@ -17,11 +17,11 @@ export const initCronJobs = () => {
       });
 
       const data = await res.json();
+      //console.log("📊 Datos recibidos:", data);
 
       // extraer valores
-      const sinVentas = data.find(e => e.estado === "Sin ventas hoy")?.cantidad || 0;
-      const critica = data.find(e => e.estado === "Critica")?.cantidad || 0;
-
+      const sinVentas = data.data.filter( e => e.estado === "Sin ventas hoy").length;
+      const critica = data.data.filter(e => e.estado === "Critica").length;
       // solo guardar si hay problemas
       if (sinVentas > 0 || critica > 0) {
 

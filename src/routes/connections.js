@@ -52,38 +52,127 @@ router.get("/", async (req, res) => {
   res.json(conns.rows);
 });
 
+/* LISTAR CONNECTIONS (con filtros opcionales) */
+router.get("/paneladmin",  async (req, res) => {
+  try {
+    const { search = "", kiosko, kds, llamador } = req.query;
+
+    const query = mgmtDb("connections")
+      .select("id", "name", "host", "codLocal", "zonal",
+        "kiosko", "ck", "kds", "c_kds", "llamador", "c_llamador", "created_at","activo")
+      .orderBy("name", "asc");
+
+    if (search) {
+      query.where((q) => {
+        q.whereILike("name", `%${search}%`)
+          .orWhereILike("host", `%${search}%`)
+          .orWhereRaw(`CAST("codLocal" AS TEXT) ILIKE ?`, [`%${search}%`]);
+      });
+    }
+
+    if (kiosko !== undefined && kiosko !== "") {
+      query.andWhere("kiosko", kiosko === "true");
+    }
+
+    if (kds !== undefined && kds !== "") {
+      query.andWhere("kds", kds === "true");
+    }
+
+    if (llamador !== undefined && llamador !== "") {
+      query.andWhere("llamador", llamador === "true");
+    }
+
+    const data = await query;
+    res.json(data);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Error obteniendo connections" });
+  }
+});
+
+// GET DETALLE LOCAL
+
+router.get("/detalle/:id",  async (req, res) => {
+
+  try {
+
+    const { id } = req.params;
+
+    const local = await mgmtDb("connections as c")
+
+      // 🔥 usuario zonal
+      .leftJoin("users as u", "u.id", "c.zonal")
+      .select(
+        "c.id",
+        "c.name",
+        "c.host",
+        "c.codLocal",
+        "c.rut",
+        "c.razon_social",
+        "c.kiosko",
+        "c.ck",
+        "c.kds",
+        "c.c_kds",
+        "c.llamador",
+        "c.c_llamador",
+        "c.activo",
+        "c.created_at",
+        // 🔥 zonal
+        "u.id as zonal_id",
+        "u.full_name as zonal_nombre",
+        "u.email as zonal_email"
+      )
+      .where("c.id", id)
+      .first();
+
+    if (!local) {
+      return res.status(404).json({
+        error: "Local no encontrado"
+      });
+    }
+
+    res.json(local);
+
+  } catch (error) {
+
+    console.error(error);
+
+    res.status(500).json({
+      error: "Error obteniendo detalle"
+    });
+  }
+});
+
 // ✅ Crear conexión
 router.post("/",  async (req, res) => {
   try {
-    const { name, host, codLocal } = req.body;
-    if (!name || !host || !codLocal)
-      return res.status(400).json({ error: "campos faltantes" });
+    const payload = normalizarBody(req.body);
 
-    const [conn] = await mgmtDb("connections")
-      .insert({
-        name,
-        host,
-        codLocal,
-        created_by: req.user.id,
-      })
-      .returning(["id", "name", "host", "codLocal"]);
+    const [row] = await mgmtDb("connections")
+      .insert(payload)
+      .returning("*");
 
-    res.json(conn);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error al crear conexión" });
+    res.status(201).json(row);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Error creando registro" });
   }
 });
 
 // ✅ Editar conexión
-router.put("/:id",  async (req, res) => {
+router.put("/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    const { name, host, codLocal } = req.body;
-    await mgmtDb("connections").where({ id }).update({ name, host, codLocal });
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: "Error al actualizar conexión" });
+    const payload = normalizarBody(req.body);
+
+    const [row] = await mgmtDb("connections")
+      .where({ id: req.params.id })
+      .update(payload)
+      .returning("*");
+
+    res.json(row);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Error actualizando registro" });
   }
 });
 
@@ -97,6 +186,30 @@ router.get("/:id", async (req, res) => {
   } catch {
     res.status(500).json({ error: "Error al obtener conexión" });
   }
+});
+
+router.patch("/estado/:id", async (req, res) => {
+  const { id } = req.params;
+  const { activo } = req.body;
+  const user = req.user;
+
+  if (typeof activo !== "boolean") {
+    return res.status(400).json({ error: "activo debe ser boolean" });
+  }
+
+  await mgmtDb("connections").where({ id }).update({ activo });
+
+  /*await logMenuChange({
+    entidad: "connection",
+    entidadId: id,
+    campo: "UDTATE_ACTIVO",
+    valorAnterior: activo ? false : true,
+    valorNuevo: activo,
+    usuario: user.username,
+    rol: user.role,
+  });*/
+
+  res.json({ ok: true });
 });
 
 // ✅ Eliminar
@@ -203,5 +316,26 @@ router.post("/asignar-locales", async (req, res) => {
   }
 });
 
+/* HELPERS*/
+function normalizarBody(body) {
+  return {
+    name: body.name?.trim(),
+    host: body.host?.trim(),
+
+    codLocal: body.codLocal ? Number(body.codLocal) : null,
+    zonal: body.zonal ? Number(body.zonal) : null,
+
+    kiosko: !!body.kiosko,
+    ck: body.ck ? Number(body.ck) : null,
+
+    kds: !!body.kds,
+    c_kds: body.c_kds ? Number(body.c_kds) : null,
+
+    llamador: !!body.llamador,
+    c_llamador: body.c_llamador ? Number(body.c_llamador) : null,
+
+    activo: body.activo === undefined ? true : !!body.activo
+  };
+}
 
 export default router;

@@ -1,4 +1,5 @@
 import express from "express";
+import { enviarCorreoAlerta } from "../services/mailService.js";
 import mgmtDb from "../db/adminDB.js";
 import  {getCentralPool }  from "../db/dbCentral.js";
 const router = express.Router();
@@ -130,7 +131,11 @@ router.get("/estado-equipos", async (req, res) => {
 });
 
 router.get("/estado-horario/resumen", async (req, res) => {
-  /* VALIDAR API KEY */
+
+  /* =====================================================
+     VALIDAR API KEY
+  ===================================================== */
+
   const apiKey = req.headers["x-api-key"];
 
   if (apiKey !== process.env.API_KEY) {
@@ -138,59 +143,174 @@ router.get("/estado-horario/resumen", async (req, res) => {
       error: "No autorizado"
     });
   }
-  
+
   try {
+
     const pool = await getCentralPool();
 
+    /* CONSULTA */
+
     const result = await pool.request().query(`
-      SELECT estado, COUNT(*) AS cantidad
-      FROM (
-        SELECT
-          CASE
-            WHEN MAX(e.fecha) < CAST(GETDATE() AS DATE)
-              THEN 'Sin ventas hoy'
-            WHEN DATEDIFF(
-              MINUTE,
-              MAX(
-                DATEADD(SECOND,
-                  DATEDIFF(SECOND,'00:00:00',e.hora),
-                  CAST(e.fecha AS DATETIME)
-                )
-              ),
-              GETDATE()
-            ) <= 10
-              THEN 'En horario'
-            WHEN DATEDIFF(
-              MINUTE,
-              MAX(
-                DATEADD(SECOND,
-                  DATEDIFF(SECOND,'00:00:00',e.hora),
-                  CAST(e.fecha AS DATETIME)
-                )
-              ),
-              GETDATE()
-            ) BETWEEN 11 AND 59
-              THEN 'Demora leve'
-            ELSE 'Critica'
-          END AS estado
-        FROM emitidos e
-        LEFT JOIN locales l ON e.Local = l.Num_local
-        WHERE e.anulado = 0
-        GROUP BY e.Local, l.Nom_local
-      ) AS sub
-      GROUP BY estado
-      ORDER BY estado;
+
+      SELECT
+        e.Local AS codLocal,
+        l.Nom_local,
+
+        CASE
+
+          WHEN MAX(e.fecha) < CAST(GETDATE() AS DATE)
+            THEN 'Sin ventas hoy'
+
+          WHEN DATEDIFF(
+            MINUTE,
+
+            MAX(
+              DATEADD(
+                SECOND,
+                DATEDIFF(SECOND,'00:00:00',e.hora),
+                CAST(e.fecha AS DATETIME)
+              )
+            ),
+
+            GETDATE()
+
+          ) <= 10
+            THEN 'En horario'
+
+          WHEN DATEDIFF(
+            MINUTE,
+
+            MAX(
+              DATEADD(
+                SECOND,
+                DATEDIFF(SECOND,'00:00:00',e.hora),
+                CAST(e.fecha AS DATETIME)
+              )
+            ),
+
+            GETDATE()
+
+          ) BETWEEN 11 AND 59
+            THEN 'Demora leve'
+
+          ELSE 'Critica'
+
+        END AS estado
+
+      FROM emitidos e
+
+      LEFT JOIN locales l
+        ON e.Local = l.Num_local
+
+      WHERE e.anulado = 0 
+
+      GROUP BY
+        e.Local,
+        l.Nom_local
+
+      ORDER BY
+        estado,
+        l.Nom_local
+
     `);
-      
-    res.json(result.recordset);
+
+    const data = result.recordset;
+    
+
+    /*  ALERTAS */
+
+    const alertas = data.filter(x =>
+      x.estado === "Critica" ||
+      x.estado === "Sin ventas hoy"
+    );
+
+    /* ENVIAR NOTIFICACION + EMAIL */
+
+    if (alertas.length > 0) {
+      const mensaje =
+        `🚨 Existen ${alertas.length} locales con retraso de distibucion de venta`;
+
+      const htmlRows = alertas.map(x => `
+
+        <tr>
+          <td style=" padding:8px; border:1px solid #ddd; ">
+            ${x.codLocal}
+          </td>
+
+          <td style=" padding:8px;  border:1px solid #ddd; ">
+            ${x.Nom_local}
+          </td>
+
+          <td style=" padding:8px; border:1px solid #ddd; color:${x.estado === "Critica" ? "red" : "orange"};
+            font-weight:bold; ">
+            ${x.estado}
+          </td>
+        </tr>
+      `).join("");
+
+      const html = `
+        <div style=" font-family:Arial; padding:20px; ">
+          <h2 style="color:#dc3545;">
+            🚨 Resumen Monitoreo Ventas
+          </h2>
+          <p>
+            Se detectaron locales con problemas de venta.
+          </p>
+          <table style="border-collapse:collapse; width:100%; ">
+            <thead>
+              <tr style="background:#f5f5f5;">
+                <th style="padding:8px; border:1px solid #ddd;">
+                  Código
+                </th>
+
+                <th style="padding:8px; border:1px solid #ddd; ">
+                  Local
+                </th>
+
+                <th style=" padding:8px; border:1px solid #ddd; ">
+                  Estado
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              ${htmlRows}
+            </tbody>
+          </table>
+          <p>
+            Por favor contactar a N2 para realizar revisión del Distribuidor y seguimiento de venta.
+          </p>
+        </div>
+      `;
+
+      /* ENVIAR EMAIL */
+      await enviarCorreoAlerta({
+        subject:
+          `🚨 ${alertas.length} locales con problemas de Distribución`,
+
+        html,
+        to: "mesadeayuda@tarragona.cl"
+      });
+
+      }
+
+    /* RESPUESTA API */
+
+    res.json({
+      total: data.length,
+      alertas: alertas.length,
+      data
+    });
 
   } catch (err) {
+
     console.error(err);
+
     res.status(500).json({
       message: "Error generando resumen de estados"
     });
   }
 });
+
 
 // Carga masiva de tickets
 router.post("/zendesks/bulk", async (req, res) => {
@@ -236,6 +356,114 @@ router.post("/zendesks/bulk", async (req, res) => {
   } catch (error) {
     console.error("ERROR BULK ZENDESK:", error);
     res.status(500).json({ error: "Error carga masiva" });
+  }
+});
+
+
+//Estado de servicio deliverhub - POST para que los locales envíen su respuesta
+router.post("/deliverhub", async (req, res) => {
+  /* VALIDAR API KEY */
+    const apiKey = req.headers["x-api-key"];
+
+    if (apiKey !== process.env.API_KEY) {
+      return res.status(401).json({
+        error: "No autorizado"
+      });
+    }
+
+  try {
+    const {
+      codlocal,
+      respuesta
+    } = req.body;
+
+    if (!codlocal || !respuesta) {
+      return res.status(400).json({
+        error: "codlocal y respuesta son requeridos"
+      });
+    }
+
+    // 🔥 Validar local existente
+    const local = await db("connections")
+      .where({ codLocal: codlocal })
+      .first();
+
+    if (!local) {
+      return res.status(404).json({
+        error: "Local no encontrado"
+      });
+    }
+
+    const [row] = await db("pc_respuestas")
+      .insert({
+        codlocal,
+        respuesta
+      })
+      .returning("*");
+
+    res.status(201).json({
+      ok: true,
+      data: row
+    });
+
+  } catch (error) {
+
+    console.error(error);
+
+    res.status(500).json({
+      error: "Error guardando respuesta"
+    });
+  }
+});
+
+/* LISTAR RESPUESTAS */
+
+router.get("/deliverhub", async (req, res) => {
+
+  try {
+
+    const data = await db("pc_respuestas as p")
+      .join("connections as c", "c.codLocal", "p.codlocal")
+      .select(
+        "p.id",
+        "p.codlocal",
+        "c.name as local",
+        "p.respuesta",
+        "p.leido",
+        "p.created_at"
+      )
+      .orderBy("p.created_at", "desc");
+
+    res.json(data);
+
+  } catch (error) {
+
+    console.error(error);
+
+    res.status(500).json({
+      error: "Error obteniendo respuestas"
+    });
+  }
+});
+
+/* MARCAR LEIDO */
+
+router.put("/deliverhub/leido/:id", async (req, res) => {
+  try {
+    await db("pc_respuestas")
+      .where({ id: req.params.id })
+      .update({
+        leido: true
+      });
+
+    res.json({
+      ok: true
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      error: "Error actualizando"
+    });
   }
 });
 

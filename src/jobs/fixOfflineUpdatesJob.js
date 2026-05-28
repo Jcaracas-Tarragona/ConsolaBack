@@ -26,7 +26,7 @@ for (const connRow of conexionesKiosko) {
     await pool.request().query(`
       UPDATE articulo
       SET Web = 0
-      WHERE codigo IN (2088,2089,2090,2091,2082,2083)
+      WHERE codigo IN (2173)
     `);
 
     await pool.close();
