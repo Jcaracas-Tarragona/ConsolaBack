@@ -334,7 +334,9 @@ function normalizarBody(body) {
     llamador: !!body.llamador,
     c_llamador: body.c_llamador ? Number(body.c_llamador) : null,
 
-    activo: body.activo === undefined ? true : !!body.activo
+    activo: body.activo === undefined ? true : !!body.activo,
+    rut: body.rut ? body.rut.trim() : null,
+    razon_social: body.razon_social ? body.razon_social.trim() : null,
   };
 }
 
