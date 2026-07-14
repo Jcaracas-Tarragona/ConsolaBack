@@ -25,6 +25,15 @@ curl -X POST "http://tu-api.local/actualizaciones" ^
   -d "{\"equipo\":\"%COMPUTERNAME%\",\"modulo\":\"ACTPTOVENTA\",\"estado\":\"actualizado\",\"fecha\":\"%date% %time%\"}"
 */
 
+function obtenerDiaSemana() {
+  // JS: domingo=0 ... sábado=6
+  // Nosotros: lunes=1 ... domingo=7
+
+  const dia = new Date().getDay();
+
+  return dia === 0 ? 7 : dia;
+}
+
 router.post("/", async (req, res) => {
 
   try {
@@ -132,9 +141,7 @@ router.get("/estado-equipos", async (req, res) => {
 
 router.get("/estado-horario/resumen", async (req, res) => {
 
-  /* =====================================================
-     VALIDAR API KEY
-  ===================================================== */
+  /* VALIDAR API KEY */
 
   const apiKey = req.headers["x-api-key"];
 
@@ -214,101 +221,91 @@ router.get("/estado-horario/resumen", async (req, res) => {
 
     `);
 
-    const data = result.recordset;
+    let data = result.recordset;
     
+    /* VALIDAR LOCALES CERRADOS  */
+    const diaSemana = obtenerDiaSemana();
 
-    /*  ALERTAS */
+    const localesSinVentas = data
+      .filter(x => x.estado === "Sin ventas hoy")
+      .map(x => String(x.codLocal));
 
+    if (localesSinVentas.length > 0) {
+
+      const horarios = await mgmtDb("local_horarios_base")
+        .select("codlocal")
+        .where({
+          dia_semana: diaSemana,
+          activo: true,
+          cerrado: true
+        })
+        .whereIn("codlocal", localesSinVentas);
+
+      const localesCerrados = new Set(
+        horarios.map(h => String(h.codlocal))
+      );
+
+      data = data.map(local => {
+
+        if (
+          local.estado === "Sin ventas hoy" &&
+          localesCerrados.has(String(local.codLocal))
+        ) {
+
+          return {
+            ...local,
+            estado: "Cerrado"
+          };
+
+        }
+
+        return local;
+
+      });
+
+    }
+
+    /* ALERTAS */
     const alertas = data.filter(x =>
       x.estado === "Critica" ||
       x.estado === "Sin ventas hoy"
     );
 
-    /* ENVIAR NOTIFICACION + EMAIL */
+    /* RESUMEN PARA DASHBOARD */
 
-    if (alertas.length > 0) {
-      const mensaje =
-        `🚨 Existen ${alertas.length} locales con retraso de distibucion de venta`;
+    const resumen = Object.values(
+      data.reduce((acc, item) => {
+        if (!acc[item.estado]) {
+          acc[item.estado] = {
+            estado: item.estado,
+            cantidad: 0
+          };
+        }
 
-      const htmlRows = alertas.map(x => `
-
-        <tr>
-          <td style=" padding:8px; border:1px solid #ddd; ">
-            ${x.codLocal}
-          </td>
-
-          <td style=" padding:8px;  border:1px solid #ddd; ">
-            ${x.Nom_local}
-          </td>
-
-          <td style=" padding:8px; border:1px solid #ddd; color:${x.estado === "Critica" ? "red" : "orange"};
-            font-weight:bold; ">
-            ${x.estado}
-          </td>
-        </tr>
-      `).join("");
-
-      const html = `
-        <div style=" font-family:Arial; padding:20px; ">
-          <h2 style="color:#dc3545;">
-            🚨 Resumen Monitoreo Ventas
-          </h2>
-          <p>
-            Se detectaron locales con problemas de venta.
-          </p>
-          <table style="border-collapse:collapse; width:100%; ">
-            <thead>
-              <tr style="background:#f5f5f5;">
-                <th style="padding:8px; border:1px solid #ddd;">
-                  Código
-                </th>
-
-                <th style="padding:8px; border:1px solid #ddd; ">
-                  Local
-                </th>
-
-                <th style=" padding:8px; border:1px solid #ddd; ">
-                  Estado
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              ${htmlRows}
-            </tbody>
-          </table>
-          <p>
-            Por favor contactar a N2 para realizar revisión del Distribuidor y seguimiento de venta.
-          </p>
-        </div>
-      `;
-
-      /* ENVIAR EMAIL */
-      await enviarCorreoAlerta({
-        subject:
-          `🚨 ${alertas.length} locales con problemas de Distribución`,
-
-        html,
-        to: "mesadeayuda@tarragona.cl"
-      });
-
-      }
+        acc[item.estado].cantidad++;
+        return acc;
+      }, {})
+    );
+    console.log(resumen);
+    
 
     /* RESPUESTA API */
 
     res.json({
       total: data.length,
       alertas: alertas.length,
+      resumen,
       data
+
     });
 
   } catch (err) {
-
     console.error(err);
-
     res.status(500).json({
       message: "Error generando resumen de estados"
     });
   }
+
 });
 
 

@@ -59,7 +59,7 @@ router.get("/paneladmin",  async (req, res) => {
 
     const query = mgmtDb("connections")
       .select("id", "name", "host", "codLocal", "zonal",
-        "kiosko", "ck", "kds", "c_kds", "llamador", "c_llamador", "created_at","activo")
+        "kiosko", "ck", "kds", "c_kds", "llamador", "c_llamador", "created_at","activo", "rut", "razon_social")
       .orderBy("name", "asc");
 
     if (search) {
@@ -120,7 +120,9 @@ router.get("/detalle/:id",  async (req, res) => {
         // 🔥 zonal
         "u.id as zonal_id",
         "u.full_name as zonal_nombre",
-        "u.email as zonal_email"
+        "u.email as zonal_email",
+        "c.rut as rut",
+        "c.razon_social as razon_social"
       )
       .where("c.id", id)
       .first();
