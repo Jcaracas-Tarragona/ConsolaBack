@@ -47,8 +47,6 @@ export async function enviarCorreoAlerta({
       html
     });
 
-    console.log("📧 Correo enviado");
-
   } catch (error) {
 
     console.error("❌ Error enviando correo:", error);

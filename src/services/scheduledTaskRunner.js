@@ -67,6 +67,7 @@ async function runScheduledTasks({ taskId = null, connectionIds = null } = {}) {
             WHERE codigo IN (${codigosTareas.map((c) => c.codigo_articulo).join(",")})`);
             
             await pool.close();
+
             // Guardar resultados en la tabla scheduled_task_results
             for (const tarea of tareas) {
               await mgmtDb("scheduled_task_results").insert({
@@ -101,54 +102,55 @@ async function runScheduledTasks({ taskId = null, connectionIds = null } = {}) {
             }
           }
         }
-        
-        for (const tarea of tareas) {
-          // Guardar notificación de activación de productos
-          const contenido =`${tarea.nombre} Ejecutada en ${conexiones.length} locales`;
-          await mgmtDb("notificaciones").insert({
-            titulo: "Alerta de activación de productos",
-            contenido,
-            leido: false,
-            url: `scheduled-tasks`,
-            created_at: new Date()
-          });
-          //modifica el campo visible de la tabla scheduled_tasks para que no se vuelva a ejecutar la tarea hasta el siguiente día de activación
-          await mgmtDb("scheduled_tasks")
-          .where("id", tarea.id)
-          .update({ visible: false});
-        }
-        //Envio de correo
-        if (!taskId && tareas.length > 0) {
-            const subject = `✅ ${tareas.length} promoción(es) ejecutada(s) automáticamente`;
-            const lista = tareas
-              .map( t => `<li><strong>${t.codigo}</strong> - ${t.nombre}</li>`)
-              .join("");
-
-            const html = `
-              <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px">
-                <h2>Promociones ejecutadas automáticamente</h2>
-                <p>
-                  El proceso automático ejecutó correctamente
-                  <strong>${tareas.length}</strong>
-                  promoción(es).
-                </p>
-                <ul>${lista}</ul>
-                <p>
-                  Fecha de ejecución:
-                  <strong>${new Date().toLocaleString("es-CL")}</strong>
-                </p>
-                <hr>
-                <small>
-                  Este correo fue generado automáticamente por el sistema de administración.
-                </small>
-              </div>
-            `;
-
-            await enviarCorreoAlerta({
-              subject,
-              html,
-              to: "aplicaciones@tarragona.cl"
+        if(taskId === null && tareas.length > 0) { //si no se especifica un taskId, se ejecutan todas las tareas activas para hoy y se envía una notificación
+          for (const tarea of tareas) {
+            // Guardar notificación de activación de productos
+            const contenido =`${tarea.nombre} Ejecutada en ${conexiones.length} locales`;
+            await mgmtDb("notificaciones").insert({
+              titulo: "Alerta de activación de productos",
+              contenido,
+              leido: false,
+              url: `scheduled-tasks`,
+              created_at: new Date()
             });
+            
+            //modifica el campo visible de la tabla scheduled_tasks para que no se vuelva a ejecutar la tarea hasta el siguiente día de activación
+            await mgmtDb("scheduled_tasks")
+            .where("id", tarea.id)
+            .update({ visible: true,ultima_ejecucion: new Date() });
+          }
+        
+        //Envio de correo
+          const subject = `✅ ${tareas.length} promoción(es) ejecutada(s) automáticamente`;
+          const lista = tareas
+            .map( t => `<li><strong>${t.codigo}</strong> - ${t.nombre}</li>`)
+            .join("");
+
+          const html = `
+            <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px">
+              <h2>Promociones ejecutadas automáticamente</h2>
+              <p>
+                El proceso automático ejecutó correctamente
+                <strong>${tareas.length}</strong>
+                promoción(es).
+              </p>
+              <ul>${lista}</ul>
+              <p>
+                Fecha de ejecución:
+                <strong>${new Date().toLocaleString("es-CL")}</strong>
+              </p>
+              <hr>
+              <small>
+                Este correo fue generado automáticamente por el sistema de administración.
+              </small>
+            </div>
+          `;
+
+          await enviarCorreoAlerta({
+            subject,
+            html,
+            to: "aplicaciones@tarragona.cl"
+          });
         }
 
       }
@@ -272,7 +274,7 @@ async function runScheduledTasks({ taskId = null, connectionIds = null } = {}) {
           //modifica el campo visible de la tabla scheduled_tasks para que no se vuelva a ejecutar la tarea hasta el siguiente día de desactivación
           await mgmtDb("scheduled_tasks")
               .where("id", tareaOff.id)
-              .update({ visible: true });
+              .update({ visible: false });
         }
       }
     }
