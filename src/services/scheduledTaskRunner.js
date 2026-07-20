@@ -24,15 +24,13 @@ async function runScheduledTasks({ taskId = null, connectionIds = null } = {}) {
 
   if(taskId){
       query.where("id",taskId);
-
   }else{
       query
       .where("dia_activar",diaSemana)
-      .where("visible",true);
   }
 
   const tareas = await query;
-
+  
   //si hay tareas activas para hoy, obtenemos los codigos de los articulos asociados a esas tareas y las conexiones activas
   if (tareas.length>0) {    
     const codigosTareas = await mgmtDb("scheduled_task_articles")
@@ -50,9 +48,12 @@ async function runScheduledTasks({ taskId = null, connectionIds = null } = {}) {
         .select("id", "codLocal", "name", "host");
     }
 
+
     if (!conexiones.length) {
       console.log("ℹ️ No hay conexiones activas");
     } else {    
+      console.log(conexiones);
+      
       for (const connRow of conexiones) { //recorremos las conexiones activas y ejecutamos la tarea de activacion de productos
         try {
           const config = makeMssqlConfig(connRow.host);
@@ -102,6 +103,8 @@ async function runScheduledTasks({ taskId = null, connectionIds = null } = {}) {
             }
           }
         }
+        console.log("Fin de activación por local, creando notificacion");
+        
         if(taskId === null && tareas.length > 0) { //si no se especifica un taskId, se ejecutan todas las tareas activas para hoy y se envía una notificación
           for (const tarea of tareas) {
             // Guardar notificación de activación de productos
