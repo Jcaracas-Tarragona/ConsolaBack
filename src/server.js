@@ -29,8 +29,8 @@ import "./jobs/fixOfflineUpdatesJob.js";
 import { initCronJobs } from "./jobs/distibucionAlert.js";
 import { initScheduledTaskJob } from "./jobs/scheduledTaskJob.js";
 
-//initScheduledTaskJob();
-//initCronJobs();
+initScheduledTaskJob();
+initCronJobs();
 
 // Create server
 const app = express();
