@@ -40,7 +40,7 @@ export async function enviarCorreoAlerta({
 
       to:
         to,
-      cc: cc || process.env.MAIL_TO,
+      cc: cc === false ? undefined : (cc || process.env.MAIL_TO),
 
       subject,
 

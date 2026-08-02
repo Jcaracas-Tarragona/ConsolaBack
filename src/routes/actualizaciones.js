@@ -158,19 +158,12 @@ router.get("/estado-horario/resumen", async (req, res) => {
     /* CONSULTA */
 
     const result = await pool.request().query(`
-
-      SELECT
-        e.Local AS codLocal,
-        l.Nom_local,
-
+      SELECT e.Local AS codLocal, l.Nom_local,
         CASE
-
           WHEN MAX(e.fecha) < CAST(GETDATE() AS DATE)
             THEN 'Sin ventas hoy'
-
           WHEN DATEDIFF(
             MINUTE,
-
             MAX(
               DATEADD(
                 SECOND,
@@ -178,15 +171,11 @@ router.get("/estado-horario/resumen", async (req, res) => {
                 CAST(e.fecha AS DATETIME)
               )
             ),
-
             GETDATE()
-
           ) <= 10
             THEN 'En horario'
-
           WHEN DATEDIFF(
             MINUTE,
-
             MAX(
               DATEADD(
                 SECOND,
@@ -194,33 +183,21 @@ router.get("/estado-horario/resumen", async (req, res) => {
                 CAST(e.fecha AS DATETIME)
               )
             ),
-
             GETDATE()
-
           ) BETWEEN 11 AND 59
             THEN 'Demora leve'
-
           ELSE 'Critica'
-
         END AS estado
 
-      FROM emitidos e
-
-      LEFT JOIN locales l
-        ON e.Local = l.Num_local
-
+      FROM emitidos e LEFT JOIN locales l ON e.Local = l.Num_local
       WHERE e.anulado = 0 
-
-      GROUP BY
-        e.Local,
-        l.Nom_local
-
+      GROUP BY e.Local, l.Nom_local
       ORDER BY
         estado,
         l.Nom_local
-
     `);
 
+    
     let data = result.recordset;
     
     /* VALIDAR LOCALES CERRADOS  */
@@ -240,6 +217,7 @@ router.get("/estado-horario/resumen", async (req, res) => {
           cerrado: true
         })
         .whereIn("codlocal", localesSinVentas);
+        
 
       const localesCerrados = new Set(
         horarios.map(h => String(h.codlocal))
@@ -286,7 +264,6 @@ router.get("/estado-horario/resumen", async (req, res) => {
         return acc;
       }, {})
     );
-    console.log(resumen);
     
 
     /* RESPUESTA API */

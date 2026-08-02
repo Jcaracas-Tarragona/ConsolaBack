@@ -3,18 +3,11 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const config = {
+const configBase = {
   user: process.env.CENTRAL_USER,
   password: process.env.CENTRAL_PASS,
-  server: process.env.CENTRAL_IP,
   database: process.env.DB_NAME,
-  port: Number(1433),
-
-  options: {
-    encrypt: false,
-    trustServerCertificate: true,
-  },
-
+  
   pool: {
     max: 5,
     min: 0,
@@ -23,20 +16,77 @@ const config = {
 
   connectionTimeout: 50000,
   requestTimeout: 15000,
+
+  options: {
+    encrypt: false,
+    trustServerCertificate: true
+  }
+
 };
 
-let pool = null;
 
+let poolCentral;
+
+
+/**
+ * CONEXIÓN ACTUAL DE LA APLICACIÓN
+ * QA
+ */
 export async function getCentralPool() {
-  if (pool?.connected) return pool;
+  if (!poolCentral) {
+    poolCentral = await new sql.ConnectionPool({
+      ...configBase,
+      server: process.env.CENTRAL_IP,
+      port: Number(1433)
 
-  try {
-    pool = await new sql.ConnectionPool(config).connect();
-    console.log("✅ Conectado a BD Central");
-    return pool;
-  } catch (error) {
-    pool = null;
-    console.error("❌ Error BD Central:", error.message);
-    throw error;
+    }).connect();
+
   }
+
+  return poolCentral;
+
+}
+
+
+/**
+ * CONEXIONES RRHH MULTIEMPRESA
+ */
+
+const poolsRRHH = {};
+
+export async function getSqlServerPool( empresa = "QA" ) {
+  const configuraciones = {
+    QA: {
+      server: process.env.CENTRAL_IP,
+      port: Number(1433)
+    },
+    EMPRESA1: {
+      server: process.env.CENTRAL_PROD,
+      port: Number(process.env.CENTRAL_PORT)
+    },
+    EMPRESA2: {
+      server: process.env.BD_ELEPS,
+      port: Number(process.env.CENTRAL_PORT)
+    }
+  };
+
+  const key = empresa.toUpperCase();
+  const config = configuraciones[key];
+
+  if (!config) {
+    throw new Error(`Empresa SQL no configurada: ${empresa}`);
+  }
+
+  if (!poolsRRHH[key]) {
+    poolsRRHH[key] =
+      await new sql.ConnectionPool({
+        ...configBase,
+        server: config.server,
+        port: config.port
+      }).connect();
+  }
+
+
+  return poolsRRHH[key];
+
 }

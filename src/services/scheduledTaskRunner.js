@@ -52,8 +52,6 @@ async function runScheduledTasks({ taskId = null, connectionIds = null } = {}) {
     if (!conexiones.length) {
       console.log("ℹ️ No hay conexiones activas");
     } else {    
-      console.log(conexiones);
-      
       for (const connRow of conexiones) { //recorremos las conexiones activas y ejecutamos la tarea de activacion de productos
         try {
           const config = makeMssqlConfig(connRow.host);

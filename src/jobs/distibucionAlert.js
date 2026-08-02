@@ -9,11 +9,8 @@ export const initCronJobs = () => {
 
   // Ejecutar a las 13:30 y 15:30
   cron.schedule("30 13,15 * * *", async () => {
-
-    console.log("⏰ Ejecutando tarea programada...");
-
+    console.log("⏰ Ejecutando Resumen de Distribucion...");
     try {
-
       const res = await fetch(
         "http://localhost:3000/actualizaciones/estado-horario/resumen",
         {
@@ -28,9 +25,7 @@ export const initCronJobs = () => {
       }
 
       const response = await res.json();
-
       const data = response.data || [];
-
       const alertas = data.filter(x =>
         x.estado === "Critica" ||
         x.estado === "Sin ventas hoy"
@@ -45,9 +40,7 @@ export const initCronJobs = () => {
       ).length;
 
       if (alertas.length === 0) {
-
         console.log("✅ Sin problemas, no se genera notificación.");
-
         return;
       }
 
