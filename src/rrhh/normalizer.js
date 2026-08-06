@@ -1,3 +1,17 @@
+export function normalizarTexto(texto = "") {
+
+  return texto
+    .trim()
+    .replace(/[áÁ]/g, "a")
+    .replace(/[éÉ]/g, "e")
+    .replace(/[íÍ]/g, "i")
+    .replace(/[óÓ]/g, "o")
+    .replace(/[úÚ]/g, "u")
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+
+}
+
 /** NORMALIZAR NOMBRE APELLIDO APELLIDO NOMBRE */
 export function normalizarNombre({
   nombre,
@@ -23,7 +37,10 @@ export function normalizarCargo(cargo = "") {
 
   cargo = cargo.toUpperCase();
 
-  if ( cargo.includes("JEFE") || cargo.includes("ASISTENTE") ) {
+  if (
+    cargo.includes("JEFE") ||
+    cargo.includes("ASISTENTE")
+  ) {
     return "GERENTE";
   }
 
@@ -43,10 +60,12 @@ export function normalizarEstado(estado = "") {
   return estado === "ACTIVO"
     ? "ACTIVO"
     : "INACTIVO";
+
 }
 
 /** NORMALIZAR DOCUMENTO */
 export function normalizarDocumento(documento) {
+
   if (!documento)
     return "";
 
@@ -58,38 +77,34 @@ export function normalizarDocumento(documento) {
 }
 
 /** NORMALIZAR LOCAL */
-export function normalizarLocal( nombreLocal, mapaLocales ) {
-  const key = nombreLocal
-    .trim()
-    .toUpperCase();
+export function normalizarLocal(nombreLocal, mapaLocales) {
+
+  const key = normalizarTexto(nombreLocal);
 
   if (!mapaLocales.has(key))
     return null;
 
-  const local = mapaLocales.get(key);
-
-  return `0,${local}`;
-
+  return `0,${mapaLocales.get(key)}`;
 }
 
 /** NORMALIZAR REGISTRO COMPLETO */
 export function normalizarRegistro(fila, mapaLocales) {
 
+  const local = normalizarLocal(
+    fila["Trabajo - Nombre Área"],
+    mapaLocales
+  );
+
   return {
+
     cuil: normalizarDocumento(
       fila["Empleado  Número de Documento"]
     ),
 
     nombre: normalizarNombre({
-      nombre:
-        fila["Empleado - Nombre"],
-
-      apellido:
-        fila["Empleado - Apellido"],
-
-      segundoApellido:
-        fila["Empleado - Segundo Apellido"]
-
+      nombre: fila["Empleado - Nombre"],
+      apellido: fila["Empleado - Apellido"],
+      segundoApellido: fila["Empleado - Segundo Apellido"]
     }),
 
     perfil: normalizarCargo(
@@ -100,10 +115,11 @@ export function normalizarRegistro(fila, mapaLocales) {
       fila["Empleado - Estado"]
     ),
 
-    local: normalizarLocal(
-      fila["Trabajo - Nombre Área"],
-      mapaLocales
-    )
+    local,
+
+    error: !local
+      ? `El local "${fila["Trabajo - Nombre Área"]}" no existe.`
+      : null
 
   };
 

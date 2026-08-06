@@ -12,7 +12,7 @@ import ejecutarTareaCodigosQuemables from "../services/tareaCodigosQuemables.js"
 */
 export const tareaCodigosQuemables = () => {
     cron.schedule(
-    "42 10 1 * *",
+    "30 08 1 * *",
     async () => {
         console.log("INICIANDO TAREA CODIGOS QUEMABLES");;
 

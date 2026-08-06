@@ -41,10 +41,12 @@ async function runScheduledTasks({ taskId = null, connectionIds = null } = {}) {
       conexiones = await mgmtDb("connections")
         .whereIn("id", connectionIds)
         .where("activo", true)
+        .where("empresa_id", 2)
         .select("id", "codLocal", "name", "host");
     } else {
       conexiones = await mgmtDb("connections")
         .where("activo", true)
+        .where("empresa_id", 2)
         .select("id", "codLocal", "name", "host");
     }
 

@@ -102,7 +102,7 @@ async function ejecutarTareaCodigosQuemables() {
         to: usuario.email,
         subject: "Asignación de códigos de descuento",
         html,
-        cc: false
+        usarCc: false
       });
 
     }

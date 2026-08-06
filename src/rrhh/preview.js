@@ -1,14 +1,17 @@
 import mgmtDb from "../db/adminDb.js";
-import { leerExcel, validarColumnas, obtenerDocumentosDuplicados } from "./excelReader.js";
-import { normalizarRegistro } from "./normalizer.js";
+import {leerExcel,validarColumnas,obtenerDocumentosDuplicados } from "./excelReader.js";
+
+import { normalizarRegistro,    normalizarTexto } from "./normalizer.js";
 import { obtenerVendedoresExistentes } from "./sqlServerRepository.js";
 
 /** GENERAR PREVIEW */
 export async function generarPreview(fileBuffer, usuarioId = null, empresa = "QA") {
-  
-  /*  LEER EXCEL */
+
+  /* LEER EXCEL */
   const rows = leerExcel(fileBuffer);
+
   validarColumnas(rows);
+
   const duplicados = obtenerDocumentosDuplicados(rows);
 
   if (duplicados.length) {
@@ -25,12 +28,13 @@ export async function generarPreview(fileBuffer, usuarioId = null, empresa = "QA
   const mapaLocales = new Map();
   const mapaCodigoLocal = new Map();
 
-
   conexiones.forEach(local => {
+
     mapaLocales.set(
-      local.name.trim().toUpperCase(),
+      normalizarTexto(local.name),
       local.codLocal
     );
+
     mapaCodigoLocal.set(
       local.codLocal,
       local.name
@@ -38,30 +42,21 @@ export async function generarPreview(fileBuffer, usuarioId = null, empresa = "QA
 
   });
 
-  /* NORMALIZAR EXCEL  */
+  /* NORMALIZAR EXCEL */
 
   const vendedoresExcel = rows.map(row =>
     normalizarRegistro(row, mapaLocales)
   );
 
-  /* OBTENER VENDEDORES SQL SERVER
-     (IMPLEMENTAREMOS EN EL SIGUIENTE ARCHIVO) */
+  /* OBTENER VENDEDORES SQL */
 
-  const vendedoresBD = await obtenerVendedoresExistentes(
-    vendedoresExcel.map(v => v.cuil),empresa
+  const vendedoresBD =
+    await obtenerVendedoresExistentes(
+      vendedoresExcel.map(v => v.cuil),
+      empresa
     );
 
-  /*
-      Aquí posteriormente llamaremos algo como:
-
-      const vendedoresBD =
-          await obtenerVendedoresExistentes(
-              vendedoresExcel.map(v => v.cuil)
-          );
-
-  */
-
-  /*GENERAR PREVIEW */
+  /* GENERAR PREVIEW */
 
   const preview = [];
 
@@ -72,110 +67,159 @@ export async function generarPreview(fileBuffer, usuarioId = null, empresa = "QA
     desactivados: 0,
     sinCambios: 0,
     errores: 0
-    };
+  };
 
-    for (const vendedorExcel of vendedoresExcel) {
-        const vendedorBD =
-            vendedoresBD.get(vendedorExcel.cuil) ?? null;
+  for (const vendedorExcel of vendedoresExcel) {
 
-        /*
-        * NO EXISTE EN SQL
-        */
+    /* LOCAL NO EXISTE */
 
-        if (!vendedorBD) {
-            if (vendedorExcel.estado === "ACTIVO") {
-                summary.creados++;
-                preview.push({
-                    ...vendedorExcel,
-                    accion: "CREATE",
-                    cambios: []
-                });
-            } else {
-                summary.sinCambios++;
-                preview.push({
-                    ...vendedorExcel,
-                    accion: "SIN_CAMBIOS",
-                    cambios: []
-                });
-            }
-            continue;
-        }
+    if (vendedorExcel.error) {
 
-        /* EXISTE EN SQL */
-        const cambios = [];
-        const activoBD = vendedorBD.debaja === 0;
-        if (activoBD && vendedorExcel.estado === "INACTIVO") {
-            summary.desactivados++;
-            preview.push({
-            ...vendedorExcel,
-            localNombre: mapaCodigoLocal.get(
-                Number(vendedorExcel.local.split(",")[1])
-            ),
-            accion: "DEACTIVATE",
-            cambios: []
-            });
-            continue;
-        }
+      summary.errores++;
 
-        if (!activoBD && vendedorExcel.estado === "INACTIVO") {
-          summary.sinCambios++;
-          preview.push({
-              ...vendedorExcel,
-              localNombre: mapaCodigoLocal.get(
-                  Number(vendedorExcel.local.split(",")[1])
-              ),
-              accion: "SIN_CAMBIOS",
-              cambios: []
-          });
-          continue;
+      preview.push({
+        ...vendedorExcel,
+        localNombre: "-",
+        accion: "ERROR",
+        cambios: ["LOCAL"],
+        mensaje: vendedorExcel.error
+      });
+
+      continue;
+    }
+
+    const vendedorBD =
+      vendedoresBD.get(vendedorExcel.cuil) ?? null;
+
+    const codLocal = Number(
+      vendedorExcel.local.split(",")[1]
+    );
+
+    const localNombre =
+      mapaCodigoLocal.get(codLocal);
+
+    /*
+     * NO EXISTE EN SQL
+     */
+
+    if (!vendedorBD) {
+
+      if (vendedorExcel.estado === "ACTIVO") {
+
+        summary.creados++;
+
+        preview.push({
+          ...vendedorExcel,
+          localNombre,
+          accion: "CREATE",
+          cambios: []
+        });
+
+      } else {
+
+        summary.sinCambios++;
+
+        preview.push({
+          ...vendedorExcel,
+          localNombre,
+          accion: "SIN_CAMBIOS",
+          cambios: []
+        });
+
       }
 
-        if (!activoBD && vendedorExcel.estado === "ACTIVO") {
-            cambios.push("ESTADO");
-        }
-
-        if (vendedorBD.locales !== vendedorExcel.local) {
-            cambios.push("LOCAL");
-        }
-
-        if (vendedorBD.puesto !== vendedorExcel.perfil) {
-            cambios.push("PERFIL");
-        }
-
-        if (cambios.length) {
-            summary.actualizados++;
-            preview.push({
-            ...vendedorExcel,
-            localNombre: mapaCodigoLocal.get(
-                Number(vendedorExcel.local.split(",")[1])
-            ),
-            accion: "UPDATE",
-            cambios
-            });
-        } else {
-            summary.sinCambios++;
-            preview.push({
-            ...vendedorExcel,
-            localNombre: mapaCodigoLocal.get(
-                Number(vendedorExcel.local.split(",")[1])
-            ),
-            accion: "SIN_CAMBIOS",
-            cambios: []
-            });
-        }
+      continue;
     }
-    
+
+    /*
+     * EXISTE EN SQL
+     */
+
+    const cambios = [];
+
+    const activoBD =
+      vendedorBD.debaja === 0;
+
+    if (activoBD && vendedorExcel.estado === "INACTIVO") {
+
+      summary.desactivados++;
+
+      preview.push({
+        ...vendedorExcel,
+        localNombre,
+        accion: "DEACTIVATE",
+        cambios: []
+      });
+
+      continue;
+    }
+
+    if (!activoBD && vendedorExcel.estado === "INACTIVO") {
+
+      summary.sinCambios++;
+
+      preview.push({
+        ...vendedorExcel,
+        localNombre,
+        accion: "SIN_CAMBIOS",
+        cambios: []
+      });
+
+      continue;
+    }
+
+    if (!activoBD && vendedorExcel.estado === "ACTIVO") {
+      cambios.push("ESTADO");
+    }
+
+    if (vendedorBD.locales !== vendedorExcel.local) {
+      cambios.push("LOCAL");
+    }
+
+    if (vendedorBD.puesto !== vendedorExcel.perfil) {
+      cambios.push("PERFIL");
+    }
+
+    if (cambios.length) {
+
+      summary.actualizados++;
+
+      preview.push({
+        ...vendedorExcel,
+        localNombre,
+        accion: "UPDATE",
+        cambios
+      });
+
+    } else {
+
+      summary.sinCambios++;
+
+      preview.push({
+        ...vendedorExcel,
+        localNombre,
+        accion: "SIN_CAMBIOS",
+        cambios: []
+      });
+
+    }
+
+  }
+
   /* GUARDAR PREVIEW */
-  const [previewId] = await mgmtDb("vendedor_import_preview")
-  .insert({
-    usuario_id: null,
-    empresa,
-    summary: JSON.stringify(summary),
-    preview: JSON.stringify(preview)
-  })
-  .returning("id");
+
+  const [previewId] =
+    await mgmtDb("vendedor_import_preview")
+      .insert({
+        usuario_id: null,
+        empresa,
+        summary: JSON.stringify(summary),
+        preview: JSON.stringify(preview)
+      })
+      .returning("id");
 
   return {
+
     previewId:
       typeof previewId === "object"
         ? previewId.id
@@ -183,6 +227,7 @@ export async function generarPreview(fileBuffer, usuarioId = null, empresa = "QA
 
     summary,
     preview
+
   };
 
 }

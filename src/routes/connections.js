@@ -10,11 +10,11 @@ const router = express.Router();
 
 router.use(requireAuth);
 
-// Obtener locales sin zonal asignado
+// Obtener locales sin zonal asignado 
 router.get("/zonal/id/:userId",  async (req, res) => {
   try {
     const result = await mgmtDb("connections")
-      .select("codLocal", "name","zonal")
+      .select("codLocal", "name","zonal","empresa_id")
       .where(function () {
         this.whereNull("zonal")
             .orWhere("zonal", req.params.userId);
@@ -35,12 +35,13 @@ router.get("/zonal/id/:userId",  async (req, res) => {
   }
 });
 
+
 // listar conexiones
 router.get("/", async (req, res) => {
   const userId = req.user.id;
   const role = req.user.role;
 
-  let query = `SELECT c.id, c.name, c.host, c.created_by, c.created_at, c."codLocal" FROM connections c`;
+  let query = `SELECT c.id, c.name, c.host, c.created_by, c.created_at, c."codLocal", c.empresa_id FROM connections c`;
   const params = [];
 
   if (role === "Zonal") {
@@ -59,7 +60,7 @@ router.get("/paneladmin",  async (req, res) => {
 
     const query = mgmtDb("connections")
       .select("id", "name", "host", "codLocal", "zonal",
-        "kiosko", "ck", "kds", "c_kds", "llamador", "c_llamador", "created_at","activo", "rut", "razon_social")
+        "kiosko", "ck", "kds", "c_kds", "llamador", "c_llamador", "created_at","activo", "rut", "razon_social","empresa_id")
       .orderBy("name", "asc");
 
     if (search) {
@@ -122,7 +123,8 @@ router.get("/detalle/:id",  async (req, res) => {
         "u.full_name as zonal_nombre",
         "u.email as zonal_email",
         "c.rut as rut",
-        "c.razon_social as razon_social"
+        "c.razon_social as razon_social",
+        "c.empresa_id"
       )
       .where("c.id", id)
       .first();
@@ -253,8 +255,6 @@ router.get("/test/:id", async (req, res) => {
 
     const pool = new sql.ConnectionPool(config);
     await pool.connect();
-
-    console.log(`✅ Conexión establecida correctamente con ${connConfig.host}`);
     await pool.close();
 
     res.json({
@@ -339,6 +339,8 @@ function normalizarBody(body) {
     activo: body.activo === undefined ? true : !!body.activo,
     rut: body.rut ? body.rut.trim() : null,
     razon_social: body.razon_social ? body.razon_social.trim() : null,
+
+    empresa_id: body.empresa_id  ? Number(body.empresa_id) : 2,
   };
 }
 

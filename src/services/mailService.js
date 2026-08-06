@@ -27,7 +27,8 @@ export async function enviarCorreoAlerta({
   subject,
   html,
   to,
-  cc
+  cc,
+  usarCc = true
 
 }) {
 
@@ -40,8 +41,9 @@ export async function enviarCorreoAlerta({
 
       to:
         to,
-      cc: cc === false ? undefined : (cc || process.env.MAIL_TO),
-
+      cc: usarCc
+            ? (cc || process.env.MAIL_TO)
+            : undefined,
       subject,
 
       html
