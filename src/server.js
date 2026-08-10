@@ -27,14 +27,14 @@ import empresasRouter from "./routes/empresas.js"
 
 
 //import startDailyAlert from "./jobs/dailyAlert.js";
-//import "./jobs/fixOfflineUpdatesJob.js";
+import "./jobs/fixOfflineUpdatesJob.js";
 import { initCronJobs } from "./jobs/distibucionAlert.js";
 import { initScheduledTaskJob } from "./jobs/scheduledTaskJob.js";
 import { tareaCodigosQuemables } from "./jobs/tareaCodigosQuemables.js"
 
-//initScheduledTaskJob();
-//initCronJobs();
-//tareaCodigosQuemables();
+initScheduledTaskJob();
+initCronJobs();
+tareaCodigosQuemables();
 
 // Create server
 const app = express();

@@ -215,6 +215,7 @@ async function runScheduledTasks({ taskId = null, connectionIds = null } = {}) {
         // recorremos las conexiones activas y ejecutamos la tarea de desactivacion de productos
         conexiones = await mgmtDb("connections")
           .where("activo", true)
+          .where("empresa_id", 2)
           .select("id", "codLocal", "name", "host");
         
         for (const connRow of conexiones) {
