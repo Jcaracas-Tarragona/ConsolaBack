@@ -147,7 +147,7 @@ for (const connRow of conexionesKiosko) {
 }
 
 // 🕒 Programar: todos los días 10:35 AM
-cron.schedule("59 16 * * *", runFixOfflineUpdates);
+cron.schedule("45 09 * * *", runFixOfflineUpdates);
 
 if (process.env.RUN_FIX_NOW === "true") {
   console.log("🚀 Ejecutando reparación manual inmediata...");
