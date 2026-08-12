@@ -15,7 +15,7 @@ const configBase = {
   },
 
   connectionTimeout: 50000,
-  requestTimeout: 15000,
+  requestTimeout: 50000,
 
   options: {
     encrypt: false,

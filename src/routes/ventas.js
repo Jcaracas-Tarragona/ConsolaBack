@@ -5,7 +5,7 @@ import  {getCentralPool }  from "../db/dbCentral.js";
 import sql from "mssql";
 import { allowRoles } from "../middleware/roleMiddleware.js";
 import { requireAuth } from "../middleware/auth.js";
-import { getConnectionById, makeMssqlConfig } from "../db/connections.js";
+import { makeMssqlConfig } from "../db/connections.js";
 
 
 const router = express.Router();
@@ -21,7 +21,7 @@ router.get("/ventas-diarias", allowRoles("Admin","Zonal","Comercial"), async (re
     /* 1️⃣ OBTENER LOCALES */
 
     let connectionsQuery = mgmtDb("connections")
-      .select("name", "host", "codLocal");
+      .select("name", "host", "codLocal").where("empresa_id",2);
 
     // Si es zonal filtrar por su usuario
     if (user.role === "Zonal") {
@@ -80,7 +80,6 @@ router.get("/ventas-diarias", allowRoles("Admin","Zonal","Comercial"), async (re
         localTotal = r.recordset[0].total;
         await localPool.close();
       } catch (err) {
-
         console.error(`❌ Error local ${c.codLocal}:`, err.message);
 
       }
