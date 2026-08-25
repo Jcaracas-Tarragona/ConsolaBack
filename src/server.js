@@ -22,7 +22,8 @@ import actualizacionesRouter from "./routes/actualizaciones.js";
 import notificacionesRouter from "./routes/notificaciones.js";
 import scheduledTasksRouter from "./routes/scheduledTasks.js";
 import vendedoresRouter from "./routes/vendedores.js";
-import empresasRouter from "./routes/empresas.js"
+import empresasRouter from "./routes/empresas.js";
+import totemsRouter from "./routes/totems.js";
 
 
 //import startDailyAlert from "./jobs/dailyAlert.js";
@@ -30,10 +31,12 @@ import "./jobs/fixOfflineUpdatesJob.js";
 import { initCronJobs } from "./jobs/distibucionAlert.js";
 import { initScheduledTaskJob } from "./jobs/scheduledTaskJob.js";
 import { tareaCodigosQuemables } from "./jobs/tareaCodigosQuemables.js"
+import { totemsStatusJob } from "./jobs/totemsStatusJob.js";
 
 initScheduledTaskJob();
 initCronJobs();
 tareaCodigosQuemables();
+totemsStatusJob();
 
 // Create server
 const app = express();
@@ -71,7 +74,7 @@ app.use("/auth", authRouter);
 
 // ✅ SPA fallback (debe ir al final, después de todas las rutas)
 if (serveFrontend) {
-  app.get(/^(?!\/(auth|connections|query|logs|users|reports|menu-locales|articulos|horarios-base|horarios-especiales|ventas|actualizaciones|notificaciones|scheduled-tasks | vendedores | empresas)).*/, (req, res, next) => {
+  app.get(/^(?!\/(auth|connections|query|logs|users|reports|menu-locales|articulos|horarios-base|horarios-especiales|ventas|actualizaciones|notificaciones|scheduled-tasks | vendedores | empresas | totems )).*/, (req, res, next) => {
     // Excluir rutas API del backend
     if (
       req.originalUrl.startsWith("/auth") ||
@@ -89,7 +92,8 @@ if (serveFrontend) {
       req.originalUrl.startsWith("/notificaciones") ||
       req.originalUrl.startsWith("/scheduled-tasks") ||
       req.originalUrl.startsWith("/vendedores") ||
-      req.originalUrl.startsWith("/empresas")
+      req.originalUrl.startsWith("/empresas") ||
+      req.originalUrl.startsWith("/totems")
     ) {
       return next();
     }
@@ -115,6 +119,7 @@ app.use("/notificaciones", notificacionesRouter);
 app.use("/scheduled-tasks", scheduledTasksRouter);
 app.use("/vendedores",vendedoresRouter)
 app.use("/empresas",empresasRouter)
+app.use("/totems",totemsRouter)
 
 
 

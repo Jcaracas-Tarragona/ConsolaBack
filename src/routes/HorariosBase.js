@@ -9,180 +9,265 @@ const router = express.Router();
 router.use(requireAuth);
 
 /**
+ * ============================================================
  * GET /horarios-base
- * Agrupa días con mismo horario por local
+ *
+ * Obtiene horarios base.
+ *
+ * Relación real:
+ * local_horarios_base.connection_id -> connections.id
+ *
+ * codlocal se obtiene desde connections solamente para mostrarlo.
+ * ============================================================
  */
-router.get("/",allowRoles("Admin", "Comercial", "Zonal"),
-  async (req, res) => {
-    try {
-      const { page = 1, limit = 10, search } = req.query;
-      const offset = (page - 1) * limit;
-      const userId = req.user.id;
-      const role = req.user.role;
-
-      /* QUERY BASE */
-
-      let query = `SELECT h.codlocal, c.name AS local_nombre, h.dia_semana, h.hora_apertura,
-          h.hora_cierre, h.activo, h.cerrado 
-          FROM local_horarios_base h
-        JOIN connections c ON c."codLocal" = h.codlocal`;
-
-      const params = [];
-      const where = [];
-
-      /* FILTRO ZONAL */
-      if (role === "Zonal") {
-        where.push(`c.zonal = ?`);
-        params.push(userId);
-      }
-
-      /* BUSCADOR*/
-      if (search) {
-        where.push(`LOWER(c.name) LIKE LOWER(?)`);
-        params.push(`%${search}%`);
-      }
-
-      /* ARMAR WHERE */
-      if (where.length > 0) {
-        query += " WHERE " + where.join(" AND ");
-      }
-
-      query += ` ORDER BY c.name, h.hora_apertura, h.dia_semana`;
-
-      const result = await mgmtDb.raw(query, params);
-
-      const rows = result.rows;
-
-      /* MAPA DÍAS */
-
-      const diasMap = {
-        1: "Lun",
-        2: "Mar",
-        3: "Mié",
-        4: "Jue",
-        5: "Vie",
-        6: "Sáb",
-        7: "Dom",
-      };
-
-      /*AGRUPACIÓN */
-      const agrupado = {};
-      rows.forEach((r) => {
-
-        if (!agrupado[r.codlocal]) {
-          agrupado[r.codlocal] = {
-            codlocal: r.codlocal,
-            local_nombre: r.local_nombre,
-            bloques: {},
-          };
-        }
-
-        const keyBloque =
-          `${r.hora_apertura}-${r.hora_cierre}-${r.activo}`;
-
-        if (!agrupado[r.codlocal].bloques[keyBloque]) {
-          agrupado[r.codlocal].bloques[keyBloque] = {
-            dias: [],
-            hora_apertura:
-              r.cerrado
-                ? null
-                : r.hora_apertura.slice(0, 5),
-            hora_cierre:
-              r.cerrado
-                ? null
-                : r.hora_cierre.slice(0, 5),
-            activo: r.activo,
-            cerrado: r.cerrado
-          };
-        }
-        agrupado[r.codlocal]
-          .bloques[keyBloque]
-          .dias.push(
-            diasMap[r.dia_semana]
-          );
-
-      });
-
-      /* RESPUESTA*/
-      const items = Object.values(agrupado)
-        .map((local) => ({
-          codlocal: local.codlocal,
-          local_nombre: local.local_nombre,
-          horarios: Object.values(local.bloques)
-            .map((b) => ({
-              dias: b.dias.join(" - "),
-              horario:
-                `${b.hora_apertura} - ${b.hora_cierre}`,
-              activo: b.activo,
-              cerrado: b.cerrado
-            }))
-        }));
-
-      const paginatedItems =
-        items.slice(
-          offset,
-          offset + Number(limit)
-        );
-
-      res.json({
-
-        items: paginatedItems,
-
-        total: items.length
-
-      });
-
-    } catch (err) {
-
-      console.error("❌ Error horarios base:", err);
-
-      res.status(500).json({
-        error: "Error obteniendo horarios base"
-      });
-
-    }
-  }
-);
-
-
-
-/**
- * POST → Crear o actualizar horario base
- */
-router.post("/", allowRoles("Admin", "Comercial", "Zonal"), async (req, res) => {
-  const { codlocal, dia_semana, hora_apertura, hora_cierre, activo, cerrado } = req.body;
-
-  if (codlocal == null || dia_semana == null || !hora_apertura ||!hora_cierre) {
-    return res.status(400).json({ error: "Datos incompletos" });
-  }
-
+router.get("/", allowRoles("Admin", "Comercial", "Zonal"), async (req, res) => {
   try {
-    await mgmtDb.raw(
-      `
-      INSERT INTO local_horarios_base
-        (codlocal, dia_semana, hora_apertura, hora_cierre, activo , cerrado)
-      VALUES (?, ?, ?, ?, COALESCE(?, true), COALESCE(?, false))
-      ON CONFLICT (codlocal, dia_semana)
-      DO UPDATE SET
-        hora_apertura = EXCLUDED.hora_apertura,
-        hora_cierre   = EXCLUDED.hora_cierre,
-        activo        = EXCLUDED.activo,
-        cerrado      = EXCLUDED.cerrado,
-        created_at    = now()
-      `,
-      [codlocal, dia_semana, hora_apertura, hora_cierre, activo, cerrado]
-    );
+    const { page = 1, limit = 10, search, empresa_id } = req.query;
 
-    res.json({ ok: true });
+    const offset = (Number(page) - 1) * Number(limit);
 
+    const userId = req.user.id;
+    const role = req.user.role;
+
+    /* =========================
+       QUERY BASE
+    ========================= */
+
+    let query = ` SELECT h.connection_id, c."codLocal" AS codlocal, c.name AS local_nombre,
+          c.empresa_id, h.dia_semana, h.hora_apertura, h.hora_cierre, h.activo, h.cerrado
+          FROM local_horarios_base h
+          INNER JOIN connections c ON c.id = h.connection_id`;
+
+    const params = [];
+    const where = [];
+
+    /*  FILTRO ZONAL  */
+
+    if (role === "Zonal") {
+      where.push(`c.zonal = ?`);
+      params.push(userId);
+    }
+
+    if (empresa_id) {
+      where.push(`c.empresa_id = ?`);
+      params.push(Number(empresa_id));
+    }
+
+    /*  BUSCADOR */
+
+    if (search) {
+      where.push(
+        `( LOWER(c.name) LIKE LOWER(?) OR CAST(c."codLocal" AS TEXT) LIKE ?)`,
+      );
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    /* ARMAR WHERE */
+
+    if (where.length > 0) {
+      query += ` WHERE ${where.join(" AND ")} `;
+    }
+
+    query += `ORDER BY c.name, h.hora_apertura, h.dia_semana `;
+    const result = await mgmtDb.raw(query, params);
+    const rows = result.rows;
+
+    /*  MAPA DE DÍAS  */
+
+    const diasMap = {
+      1: "Lun",
+      2: "Mar",
+      3: "Mié",
+      4: "Jue",
+      5: "Vie",
+      6: "Sáb",
+      7: "Dom",
+    };
+
+    /*  AGRUPACIÓN
+       IMPORTANTE:
+       Antes se agrupaba por codlocal.
+       
+       Ahora se agrupa por connection_id
+       porque dos empresas pueden tener
+       el mismo codLocal.
+    ========================= */
+
+    const agrupado = {};
+
+    rows.forEach((r) => {
+      const keyLocal = r.connection_id;
+
+      if (!agrupado[keyLocal]) {
+        agrupado[keyLocal] = {
+          connection_id: r.connection_id,
+          codlocal: r.codlocal,
+          local_nombre: r.local_nombre,
+          empresa_id: r.empresa_id,
+          bloques: {},
+        };
+      }
+
+      const keyBloque = `${r.hora_apertura}-${r.hora_cierre}-${r.activo}-${r.cerrado}`;
+
+      if (!agrupado[keyLocal].bloques[keyBloque]) {
+        agrupado[keyLocal].bloques[keyBloque] = {
+          dias: [],
+          hora_apertura: r.cerrado ? null : r.hora_apertura?.slice(0, 5),
+          hora_cierre: r.cerrado ? null : r.hora_cierre?.slice(0, 5),
+          activo: r.activo,
+          cerrado: r.cerrado,
+        };
+      }
+
+      agrupado[keyLocal].bloques[keyBloque].dias.push(diasMap[r.dia_semana]);
+    });
+
+    /* =========================
+       RESPUESTA
+    ========================= */
+
+    const items = Object.values(agrupado).map((local) => ({
+      connection_id: local.connection_id,
+      codlocal: local.codlocal,
+      local_nombre: local.local_nombre,
+      empresa_id: local.empresa_id,
+      horarios: Object.values(local.bloques).map((b) => ({
+        dias: b.dias.join(" - "),
+        horario: b.cerrado
+          ? "CERRADO"
+          : `${b.hora_apertura} - ${b.hora_cierre}`,
+        hora_apertura: b.hora_apertura,
+        hora_cierre: b.hora_cierre,
+        activo: b.activo,
+        cerrado: b.cerrado,
+      })),
+    }));
+
+    const paginatedItems = items.slice(offset, offset + Number(limit));
+
+    res.json({
+      items: paginatedItems,
+      total: items.length,
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error guardando horario base" });
+    res.status(500).json({
+      error: "Error obteniendo horarios base",
+    });
   }
 });
 
+/**
+ * ============================================================
+ * POST /
+ *
+ * Crear / actualizar un horario base
+ * ============================================================
+ */
+router.post(
+  "/",
+  allowRoles("Admin", "Comercial", "Zonal"),
+  async (req, res) => {
+    let {
+      connection_id,
+      dia_semana,
+      hora_apertura,
+      hora_cierre,
+      activo,
+      cerrado = false,
+    } = req.body;
 
-router.post("/bulk", allowRoles("Admin","Zonal"), async (req, res) => {
+    if (connection_id == null || dia_semana == null) {
+      return res.status(400).json({
+        error: "Connection y día son obligatorios",
+      });
+    }
+
+    /* Si está cerrado no necesitamos horas. */
+
+    if (cerrado) {
+      hora_apertura = null;
+      hora_cierre = null;
+    } else {
+      if (!hora_apertura || !hora_cierre) {
+        return res.status(400).json({
+          error: "Horario incompleto",
+        });
+      }
+
+      if (hora_apertura >= hora_cierre) {
+        return res.status(400).json({
+          error: "Horario inválido",
+        });
+      }
+    }
+
+    try {
+      /*
+       * Validar que connection exista
+       */
+
+      const connection = await mgmtDb("connections")
+        .where({ id: connection_id })
+        .first();
+
+      if (!connection) {
+        return res.status(404).json({
+          error: "Local no encontrado",
+        });
+      }
+
+      await mgmtDb.raw(
+        ` INSERT INTO local_horarios_base (
+          connection_id,
+          dia_semana,
+          hora_apertura,
+          hora_cierre,
+          activo,
+          cerrado
+        )
+
+        VALUES ( ?, ?, ?, ?, COALESCE(?, true), COALESCE(?, false) )
+        ON CONFLICT (connection_id, dia_semana)
+        DO UPDATE SET
+          hora_apertura = EXCLUDED.hora_apertura,
+          hora_cierre = EXCLUDED.hora_cierre,
+          activo = EXCLUDED.activo,
+          cerrado = EXCLUDED.cerrado,
+          created_at = now()`,
+        [
+          connection_id,
+          dia_semana,
+          hora_apertura,
+          hora_cierre,
+          activo,
+          cerrado,
+        ],
+      );
+
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("ERROR GUARDANDO HORARIO BASE:", err);
+
+      res.status(500).json({
+        error: "Error guardando horario base",
+      });
+    }
+  },
+);
+
+/**
+ * ============================================================
+ * POST /bulk
+ *
+ * Crear horarios para varios locales y días
+ *
+ * locales debe contener connection_id:
+ *
+ * locales: [114, 115, 116]
+ * ============================================================
+ */
+router.post("/bulk", allowRoles("Admin", "Zonal"), async (req, res) => {
   try {
     let {
       dias,
@@ -190,249 +275,503 @@ router.post("/bulk", allowRoles("Admin","Zonal"), async (req, res) => {
       hora_apertura,
       hora_cierre,
       activo = true,
-      cerrado = false
+      cerrado = false,
     } = req.body;
 
-    // NORMALIZACIÓN 🔥
+    /* =========================
+         NORMALIZAR HORARIO
+      ========================= */
+
     if (cerrado) {
       hora_apertura = null;
       hora_cierre = null;
     } else {
       if (!hora_apertura || !hora_cierre || hora_apertura >= hora_cierre) {
-        return res.status(400).json({ error: "Horario inválido" });
+        return res.status(400).json({
+          error: "Horario inválido",
+        });
       }
     }
 
+    /* =========================
+         VALIDAR DÍAS
+      ========================= */
+
     if (!Array.isArray(dias) || dias.length === 0) {
-      return res.status(400).json({ error: "Debe seleccionar al menos un día" });
+      return res.status(400).json({
+        error: "Debe seleccionar al menos un día",
+      });
     }
 
+    /* =========================
+         VALIDAR LOCALES
+      ========================= */
+
     if (!Array.isArray(locales) || locales.length === 0) {
-      return res.status(400).json({ error: "Debe seleccionar al menos un local" });
+      return res.status(400).json({
+        error: "Debe seleccionar al menos un local",
+      });
     }
+
+    /*
+     * locales contiene connection_id
+     */
+
+    const connectionIds = locales.map(Number);
+
+    /*
+     * Validar que existan.
+     */
+
+    const connections = await mgmtDb("connections")
+      .whereIn("id", connectionIds)
+      .select("id");
+
+    if (connections.length !== connectionIds.length) {
+      return res.status(400).json({
+        error: "Uno o más locales no existen",
+      });
+    }
+
+    /* =========================
+         GENERAR FILAS
+      ========================= */
 
     const rows = [];
 
-    for (const codlocal of locales) {
+    for (const connection_id of connectionIds) {
       for (const dia_semana of dias) {
         rows.push({
-          codlocal,
+          connection_id,
           dia_semana,
           hora_apertura,
           hora_cierre,
           activo,
-          cerrado
+          cerrado,
         });
       }
     }
-    
+
+    /* =========================
+         INSERT / UPDATE
+      ========================= */
+
     await mgmtDb("local_horarios_base")
       .insert(rows)
-      .onConflict(["codlocal", "dia_semana"])
+      .onConflict(["connection_id", "dia_semana"])
       .merge({
         hora_apertura,
         hora_cierre,
         activo,
-        cerrado
+        cerrado,
+        created_at: mgmtDb.fn.now(),
       });
 
-    res.json({ ok: true, inserted: rows.length });
-
+    res.json({
+      ok: true,
+      inserted: rows.length,
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error guardando horarios base" });
+    console.error("ERROR BULK HORARIO BASE:", err);
+
+    res.status(500).json({
+      error: "Error guardando horarios base",
+    });
   }
 });
 
-
 /**
- * PATCH → Activar / desactivar
+ * ============================================================
+ * PATCH /:id/estado
+ *
+ * Activar / desactivar horario
+ * ============================================================
  */
 router.patch("/:id/estado", allowRoles("Admin", "Zonal"), async (req, res) => {
   const { activo } = req.body;
 
   try {
     await mgmtDb("local_horarios_base")
-      .where({ id: req.params.id })
-      .update({ activo });
+      .where({
+        id: req.params.id,
+      })
+      .update({
+        activo,
+      });
 
-    res.json({ ok: true });
-
+    res.json({
+      ok: true,
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error cambiando estado" });
+
+    res.status(500).json({
+      error: "Error cambiando estado",
+    });
   }
 });
 
 /**
- * DELETE
+ * ============================================================
+ * DELETE /:id
+ * ============================================================
  */
 router.delete("/:id", allowRoles("Admin"), async (req, res) => {
   try {
     await mgmtDb("local_horarios_base")
-      .where({ id: req.params.id })
+      .where({
+        id: req.params.id,
+      })
       .del();
 
-    res.json({ ok: true });
-
+    res.json({
+      ok: true,
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error eliminando horario" });
+
+    res.status(500).json({
+      error: "Error eliminando horario",
+    });
   }
 });
 
-router.post("/replace/:codlocal", allowRoles("Admin", "Comercial","Zonal"), async (req, res) => {
-    const { codlocal } = req.params;
-    const { dias, 
-      hora_apertura, 
-      hora_cierre, 
-      activo, cerrado } = req.body;
+/**
+ * ============================================================
+ * POST /replace/:connectionId
+ *
+ * Reemplaza todos los horarios base
+ * del local seleccionado.
+ *
+ * ANTES:
+ *
+ * /replace/:codlocal
+ *
+ * AHORA:
+ *
+ * /replace/:connectionId
+ * ============================================================
+ */
+router.post(
+  "/replace/:connectionId",
+  allowRoles("Admin", "Comercial", "Zonal"),
+  async (req, res) => {
+    const connectionId = Number(req.params.connectionId);
 
-    if (cerrado === false) {
-      if (!hora_apertura || !hora_cierre || hora_apertura >= hora_cierre) {
-        return res.status(400).json({ message: "Horario inválido" });
-      }
-    }else { 
+    let { dias, hora_apertura, hora_cierre, activo, cerrado } = req.body;
+
+    if (!connectionId || Number.isNaN(connectionId)) {
+      return res.status(400).json({
+        message: "Connection inválida",
+      });
+    }
+
+    /*
+     * Normalizar horario
+     */
+
+    if (cerrado) {
       hora_apertura = null;
       hora_cierre = null;
+    } else {
+      if (!hora_apertura || !hora_cierre || hora_apertura >= hora_cierre) {
+        return res.status(400).json({
+          message: "Horario inválido",
+        });
+      }
     }
 
     if (!Array.isArray(dias) || dias.length === 0) {
-      return res.status(400).json({ message: "Días son obligatorios" });
+      return res.status(400).json({
+        message: "Días son obligatorios",
+      });
     }
 
     try {
-      await mgmtDb.transaction(async trx => {
+      /*
+       * Validar connection
+       */
 
-        // 1️⃣ Eliminar horarios base SOLO del local
+      const connection = await mgmtDb("connections")
+        .where({
+          id: connectionId,
+        })
+        .first();
+
+      if (!connection) {
+        return res.status(404).json({
+          message: "Local no encontrado",
+        });
+      }
+
+      await mgmtDb.transaction(async (trx) => {
+        /*
+         * 1. Eliminar horarios
+         */
+
         await trx("local_horarios_base")
-          .where({ codlocal })
+          .where({
+            connection_id: connectionId,
+          })
           .del();
 
-        // 2️⃣ Insertar nuevos horarios base
-        const rows = dias.map(dia => ({
-          codlocal,
+        /*
+         * 2. Crear nuevos horarios
+         */
+
+        const rows = dias.map((dia) => ({
+          connection_id: connectionId,
+
           dia_semana: dia,
+
           hora_apertura,
+
           hora_cierre,
+
           activo,
-          cerrado
+
+          cerrado,
         }));
 
         await trx("local_horarios_base").insert(rows);
       });
 
-      res.json({ message: "Horario base reemplazado correctamente" });
-
+      res.json({
+        message: "Horario base reemplazado correctamente",
+      });
     } catch (err) {
       console.error("REPLACE HORARIO BASE ERROR:", err);
-      res.status(500).json({ message: "Error reemplazando horarios base" });
+
+      res.status(500).json({
+        message: "Error reemplazando horarios base",
+      });
     }
-  }
+  },
 );
 
-
-router.get("/export/excel",allowRoles("Admin", "Comercial","Zonal"),
+/**
+ * ============================================================
+ * GET /export/excel
+ *
+ * EXPORTACIÓN
+ *
+ * IMPORTANTE:
+ * vw_horarios_unificados debe estar actualizada
+ * para trabajar internamente con connection_id.
+ *
+ * La vista puede seguir exponiendo codlocal
+ * obteniéndolo desde connections.
+ * ============================================================
+ */
+router.get(
+  "/export/excel",
+  allowRoles("Admin", "Comercial", "Zonal"),
   async (req, res) => {
     try {
-      const horarios = await mgmtDb("vw_horarios_unificados")
-        .orderBy(["codlocal", "menuOrigen", "tipo_horario", "fecha"]);
+      const horarios = await mgmtDb("vw_horarios_unificados").orderBy([
+        "codlocal",
+        "menuOrigen",
+        "tipo_horario",
+        "fecha",
+      ]);
 
       const wb = new ExcelJS.Workbook();
 
       /* =========================
          HOJA: HORARIOS BASE
-         ========================= */
+      ========================= */
+
       const wsBase = wb.addWorksheet("Horarios Base");
 
       wsBase.columns = [
-        { header: "Código Local", key: "codlocal", width: 15 },
-        { header: "Nombre Local", key: "nombre_local", width: 30 },
-        { header: "Menú Origen", key: "menuOrigen", width: 20 },
-        { header: "Menú Crítico", key: "menuCritico", width: 15 },
-        { header: "Días", key: "dias", width: 25 },
-        { header: "Horario", key: "horario", width: 20 },
-        { header: "Estado", key: "estado", width: 15 },
-        { header: "Tipo Horario", key: "tipo_horario", width: 15 }
+        {
+          header: "Código Local",
+          key: "codlocal",
+          width: 15,
+        },
+
+        {
+          header: "Nombre Local",
+          key: "nombre_local",
+          width: 30,
+        },
+
+        {
+          header: "Menú Origen",
+          key: "menuOrigen",
+          width: 20,
+        },
+
+        {
+          header: "Menú Crítico",
+          key: "menuCritico",
+          width: 15,
+        },
+
+        {
+          header: "Días",
+          key: "dias",
+          width: 25,
+        },
+
+        {
+          header: "Horario",
+          key: "horario",
+          width: 20,
+        },
+
+        {
+          header: "Estado",
+          key: "estado",
+          width: 15,
+        },
+
+        {
+          header: "Tipo Horario",
+          key: "tipo_horario",
+          width: 15,
+        },
       ];
 
       horarios
-        .filter(h => h.tipo_horario === "BASE")
-        .forEach(h => {
+        .filter((h) => h.tipo_horario === "BASE")
+        .forEach((h) => {
           wsBase.addRow({
             codlocal: h.codlocal,
+
             nombre_local: h.nombre_local,
+
             menuOrigen: h.menuOrigen,
+
             menuCritico: h.menuCritico,
+
             dias: h.dias,
+
             horario: h.cerrado
               ? "CERRADO"
-              : `${h.hora_apertura.slice(0, 5)} - ${h.hora_cierre.slice(0, 5)}`,
+              : `${h.hora_apertura?.slice(0, 5)} - ${h.hora_cierre?.slice(0, 5)}`,
+
             estado: h.activo ? "Activo" : "Inactivo",
-            tipo_horario: h.tipo_horario
+
+            tipo_horario: h.tipo_horario,
           });
         });
 
       /* =========================
          HOJA: HORARIOS ESPECIALES
-         ========================= */
+      ========================= */
+
       const wsEsp = wb.addWorksheet("Horarios Especiales");
 
       wsEsp.columns = [
-        { header: "Código Local", key: "codlocal", width: 15 },
-        { header: "Nombre Local", key: "nombre_local", width: 30 },
-        { header: "Menú Origen", key: "menuOrigen", width: 20 },
-        { header: "Menú Crítico", key: "menuCritico", width: 15 },
-        { header: "Fecha", key: "fecha", width: 15 },
-        { header: "Horario", key: "horario", width: 20 },
-        { header: "Estado", key: "estado", width: 15 },
-        { header: "Tipo Horario", key: "tipo_horario", width: 15 },
-        { header: "Fecha Solicitud", key: "f_solicitud", width: 25 }
+        {
+          header: "Código Local",
+          key: "codlocal",
+          width: 15,
+        },
+
+        {
+          header: "Nombre Local",
+          key: "nombre_local",
+          width: 30,
+        },
+
+        {
+          header: "Menú Origen",
+          key: "menuOrigen",
+          width: 20,
+        },
+
+        {
+          header: "Menú Crítico",
+          key: "menuCritico",
+          width: 15,
+        },
+
+        {
+          header: "Fecha",
+          key: "fecha",
+          width: 15,
+        },
+
+        {
+          header: "Horario",
+          key: "horario",
+          width: 20,
+        },
+
+        {
+          header: "Estado",
+          key: "estado",
+          width: 15,
+        },
+
+        {
+          header: "Tipo Horario",
+          key: "tipo_horario",
+          width: 15,
+        },
+
+        {
+          header: "Fecha Solicitud",
+          key: "f_solicitud",
+          width: 25,
+        },
       ];
 
       horarios
-        .filter(h => h.tipo_horario === "ESPECIAL")
-        .forEach(h => {
+        .filter((h) => h.tipo_horario === "ESPECIAL")
+        .forEach((h) => {
           wsEsp.addRow({
             codlocal: h.codlocal,
+
             nombre_local: h.nombre_local,
+
             menuOrigen: h.menuOrigen,
+
             menuCritico: h.menuCritico,
-            fecha: h.fecha
-              ? h.fecha.toISOString().split("T")[0]
-              : "",
+
+            fecha: h.fecha ? h.fecha.toISOString().split("T")[0] : "",
+
             horario: h.cerrado
               ? "CERRADO"
-              : `${h.hora_apertura.slice(0, 5)} - ${h.hora_cierre.slice(0, 5)}`,
+              : `${h.hora_apertura?.slice(0, 5)} - ${h.hora_cierre?.slice(0, 5)}`,
+
             estado: h.activo ? "Activo" : "Inactivo",
+
             tipo_horario: h.tipo_horario,
-            f_solicitud: h.f_solicitud  
+
+            f_solicitud: h.f_solicitud
               ? h.f_solicitud.toISOString().replace("T", " ").slice(0, 19)
-              : ""
+              : "",
           });
         });
 
       /* =========================
          RESPONSE
-         ========================= */
+      ========================= */
+
       res.setHeader(
         "Content-Type",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       );
+
       res.setHeader(
         "Content-Disposition",
-        "attachment; filename=horarios.xlsx"
+        "attachment; filename=horarios.xlsx",
       );
 
       await wb.xlsx.write(res);
-      res.end();
 
+      res.end();
     } catch (error) {
       console.error(error);
-      res.status(500).json({ error: "Error exportando Excel" });
-    }
-  }
-);
 
+      res.status(500).json({
+        error: "Error exportando Excel",
+      });
+    }
+  },
+);
 
 export default router;
