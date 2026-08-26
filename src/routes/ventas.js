@@ -1,7 +1,7 @@
 // routes/ventas.js
 import express from "express";
 import mgmtDb from "../db/adminDb.js";
-import  {getCentralPool }  from "../db/dbCentral.js";
+import  {getCentralPool,getSqlServerPool }  from "../db/dbCentral.js";
 import sql from "mssql";
 import { allowRoles } from "../middleware/roleMiddleware.js";
 import { requireAuth } from "../middleware/auth.js";
@@ -9,6 +9,15 @@ import { makeMssqlConfig } from "../db/connections.js";
 
 
 const router = express.Router();
+
+function obtenerDiaSemana() {
+  // JS: domingo=0 ... sábado=6
+  // Nosotros: lunes=1 ... domingo=7
+
+  const dia = new Date().getDay();
+
+  return dia === 0 ? 7 : dia;
+}
 
 router.use(requireAuth);
 
@@ -120,82 +129,500 @@ router.get("/ventas-diarias", allowRoles("Admin","Zonal","Comercial"), async (re
 
 });
 
+router.get(
+  "/estado-horario",
+  allowRoles("Admin"),
+  async (req, res) => {
+    try {
 
-router.get("/estado-horario", allowRoles("Admin"), async (req, res) => {
+      /* =====================================================
+         EMPRESA
+      ===================================================== */
 
-  try {
-    /* CONEXIÓN CENTRAL */
-    const pool = await getCentralPool();
+      const empresaSeleccionada = Number(
+        req.query.empresa_id || 1
+      );
 
-    /* CONSULTA AGRUPADA */
-    const result = await pool.request().query(`
-      SELECT   e.Local, l.Nom_local AS nombreLocal,
-        -- Última fecha/hora como TEXTO (evita desfase)
-            CONVERT(varchar(19),
-                MAX(
-                    DATEADD(SECOND,
-                        DATEDIFF(SECOND,'00:00:00',e.hora),
-                        CAST(e.fecha AS DATETIME)
-                    )
+      const mapaEmpresas = {
+        1: {
+          sqlServer: "QA",
+          empresaInternaId: 2
+        },
+
+        3: {
+          sqlServer: "EMPRESA2",
+          empresaInternaId: 3
+        }
+      };
+
+      const empresaConfig =
+        mapaEmpresas[empresaSeleccionada];
+
+      if (!empresaConfig) {
+        return res.status(400).json({
+          message: "Empresa no válida"
+        });
+      }
+
+      const {
+        sqlServer,
+        empresaInternaId
+      } = empresaConfig;
+
+
+      /* =====================================================
+         NORMALIZAR CODLOCAL
+      ===================================================== */
+
+      const normalizarCodLocal = (valor) => {
+        if (
+          valor === null ||
+          valor === undefined
+        ) {
+          return null;
+        }
+
+        const numero = Number(
+          String(valor).trim()
+        );
+
+        return Number.isFinite(numero)
+          ? numero
+          : null;
+      };
+
+
+      /* =====================================================
+         CONNECTIONS ACTUALES
+      ===================================================== */
+
+      const conexiones = await mgmtDb("connections")
+        .where(
+          "empresa_id",
+          empresaInternaId
+        )
+        .select(
+          "id",
+          "codLocal",
+          "name",
+          "activo"
+        );
+
+
+      /* =====================================================
+         MAPA CONNECTIONS
+      ===================================================== */
+
+      const mapaConexiones = new Map();
+
+      conexiones.forEach(connection => {
+        const codigo =
+          normalizarCodLocal(
+            connection.codLocal
+          );
+
+        if (codigo !== null) {
+          mapaConexiones.set(
+            codigo,
+            connection
+          );
+        }
+      });
+
+
+      /* =====================================================
+         SQL SERVER
+      ===================================================== */
+
+      const pool =
+        await getSqlServerPool(
+          sqlServer
+        );
+
+
+      /* =====================================================
+         CONSULTA CENTRAL
+         
+         Solo consideramos locales con actividad
+         dentro de los últimos 30 días.
+      ===================================================== */
+
+      const result = await pool.request().query(`
+        SELECT
+          e.Local AS codLocal,
+          l.Nom_local AS nombreLocal,
+
+          CONVERT(
+            varchar(19),
+            MAX(
+              DATEADD(
+                SECOND,
+                DATEDIFF(
+                  SECOND,
+                  '00:00:00',
+                  e.hora
                 ),
-            120) AS ultimaFecha,
-            -- Diferencia en minutos
-            DATEDIFF(
-                MINUTE,
-                MAX(
-                    DATEADD(SECOND,
-                        DATEDIFF(SECOND,'00:00:00',e.hora),
-                        CAST(e.fecha AS DATETIME)
-                    )
+                CAST(e.fecha AS DATETIME)
+              )
+            ),
+            120
+          ) AS ultimaFecha,
+
+          DATEDIFF(
+            MINUTE,
+            MAX(
+              DATEADD(
+                SECOND,
+                DATEDIFF(
+                  SECOND,
+                  '00:00:00',
+                  e.hora
                 ),
-                GETDATE()
-            ) AS minutos,
-            CASE
-                -- No hay ventas hoy
-                WHEN MAX(e.fecha) < CAST(GETDATE() AS DATE)
-                    THEN 'Sin ventas hoy'
-                -- En horario
-                WHEN DATEDIFF(
-                    MINUTE,
-                    MAX(
-                        DATEADD(SECOND,
-                            DATEDIFF(SECOND,'00:00:00',e.hora),
-                            CAST(e.fecha AS DATETIME)
-                        )
-                    ),
-                    GETDATE()
-                ) <= 10
-                    THEN 'En horario'
-                -- Demora leve
-                WHEN DATEDIFF(
-                    MINUTE,
-                    MAX(
-                        DATEADD(SECOND,
-                            DATEDIFF(SECOND,'00:00:00',e.hora),
-                            CAST(e.fecha AS DATETIME)
-                        )
-                    ),
-                    GETDATE()
-                ) BETWEEN 11 AND 59
-                    THEN 'Demora leve'
-                -- Critica
-                ELSE 'Critica'
-            END AS estado
+                CAST(e.fecha AS DATETIME)
+              )
+            ),
+            GETDATE()
+          ) AS minutos,
+
+          CASE
+            WHEN MAX(e.fecha) < CAST(GETDATE() AS DATE)
+              THEN 'Sin ventas hoy'
+
+            WHEN DATEDIFF(
+              MINUTE,
+              MAX(
+                DATEADD(
+                  SECOND,
+                  DATEDIFF(
+                    SECOND,
+                    '00:00:00',
+                    e.hora
+                  ),
+                  CAST(e.fecha AS DATETIME)
+                )
+              ),
+              GETDATE()
+            ) <= 10
+              THEN 'En horario'
+
+            WHEN DATEDIFF(
+              MINUTE,
+              MAX(
+                DATEADD(
+                  SECOND,
+                  DATEDIFF(
+                    SECOND,
+                    '00:00:00',
+                    e.hora
+                  ),
+                  CAST(e.fecha AS DATETIME)
+                )
+              ),
+              GETDATE()
+            ) BETWEEN 11 AND 59
+              THEN 'Demora leve'
+
+            ELSE 'Critica'
+
+          END AS estado
+
         FROM emitidos e
-        LEFT JOIN locales l ON e.Local = l.Num_local
+
+        LEFT JOIN locales l
+          ON e.Local = l.Num_local
+
         WHERE e.anulado = 0
-        GROUP BY e.Local, l.Nom_local
-        ORDER BY e.Local;
-    `);
-    
-    res.json(result.recordset);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      message:"Error consultando horarios"
-    });
+
+        GROUP BY
+          e.Local,
+          l.Nom_local
+
+        HAVING
+          MAX(e.fecha) >= DATEADD(
+            DAY,
+            -30,
+            CAST(GETDATE() AS DATE)
+          )
+
+        ORDER BY
+          e.Local;
+      `);
+
+
+      let data =
+        result.recordset || [];
+
+
+      /* =====================================================
+         SOLO LOCALES QUE EXISTEN EN CONNECTIONS
+      =====================================================
+         
+         connections define cuáles locales forman parte
+         actualmente de la empresa.
+      ===================================================== */
+
+      data = data
+        .filter(item => {
+          const codigo =
+            normalizarCodLocal(
+              item.codLocal
+            );
+
+          return mapaConexiones.has(
+            codigo
+          );
+        })
+        .map(item => {
+          const codigo =
+            normalizarCodLocal(
+              item.codLocal
+            );
+
+          const connection =
+            mapaConexiones.get(
+              codigo
+            );
+
+          return {
+            ...item,
+
+            codLocal:
+              codigo,
+
+            connection_id:
+              connection.id,
+
+            nombreLocal:
+              connection.name ||
+              item.nombreLocal,
+
+            activo:
+              connection.activo
+          };
+        });
+
+
+      /* =====================================================
+         LOCALES INACTIVOS = CERRADO
+      ===================================================== */
+
+      data = data.map(local => {
+        if (local.activo === false) {
+          return {
+            ...local,
+            estado: "Cerrado",
+            minutos: null
+          };
+        }
+
+        return local;
+      });
+
+
+      /* =====================================================
+         AGREGAR CONNECTIONS QUE NO APARECIERON
+         EN LOS ÚLTIMOS 30 DÍAS
+      =====================================================
+         
+         activo   → Sin ventas hoy
+         inactivo → Cerrado
+      ===================================================== */
+
+      const codigosData =
+        new Set(
+          data.map(local =>
+            normalizarCodLocal(
+              local.codLocal
+            )
+          )
+        );
+
+
+      conexiones.forEach(connection => {
+        const codigo =
+          normalizarCodLocal(
+            connection.codLocal
+          );
+
+        if (
+          codigo === null ||
+          codigosData.has(codigo)
+        ) {
+          return;
+        }
+
+        data.push({
+          codLocal:
+            codigo,
+
+          nombreLocal:
+            connection.name,
+
+          connection_id:
+            connection.id,
+
+          ultimaFecha:
+            null,
+
+          minutos:
+            null,
+
+          activo:
+            connection.activo,
+
+          estado:
+            connection.activo
+              ? "Sin ventas hoy"
+              : "Cerrado"
+        });
+      });
+
+
+      /* =====================================================
+         VALIDAR HORARIOS CERRADOS
+      ===================================================== */
+
+      const diaSemana =
+        obtenerDiaSemana();
+
+
+      const conexionesSinVentas =
+        data
+          .filter(local =>
+            local.estado === "Sin ventas hoy" &&
+            local.activo === true &&
+            local.connection_id !== null
+          )
+          .map(local =>
+            Number(
+              local.connection_id
+            )
+          )
+          .filter(
+            Number.isFinite
+          );
+
+
+      if (
+        conexionesSinVentas.length > 0
+      ) {
+        const horarios =
+          await mgmtDb(
+            "local_horarios_base"
+          )
+            .select(
+              "connection_id"
+            )
+            .where({
+              dia_semana:
+                diaSemana,
+
+              activo:
+                true,
+
+              cerrado:
+                true
+            })
+            .whereIn(
+              "connection_id",
+              conexionesSinVentas
+            );
+
+
+        const conexionesCerradas =
+          new Set(
+            horarios.map(
+              horario =>
+                Number(
+                  horario.connection_id
+                )
+            )
+          );
+
+
+        data = data.map(local => {
+          if (
+            local.estado === "Sin ventas hoy" &&
+            conexionesCerradas.has(
+              Number(
+                local.connection_id
+              )
+            )
+          ) {
+            return {
+              ...local,
+              estado: "Cerrado",
+              minutos: null
+            };
+          }
+
+          return local;
+        });
+      }
+
+
+      /* =====================================================
+         ORDEN POR PRIORIDAD
+      ===================================================== */
+
+      const prioridad = {
+        "Sin ventas hoy": 1,
+        "Critica": 2,
+        "Demora leve": 3,
+        "En horario": 4,
+        "Cerrado": 5
+      };
+
+
+      data.sort((a, b) => {
+        const prioridadA =
+          prioridad[a.estado] ?? 99;
+
+        const prioridadB =
+          prioridad[b.estado] ?? 99;
+
+        if (
+          prioridadA !== prioridadB
+        ) {
+          return (
+            prioridadA -
+            prioridadB
+          );
+        }
+
+        return (
+          Number(a.codLocal) -
+          Number(b.codLocal)
+        );
+      });
+
+
+      /* =====================================================
+         RESPUESTA
+         
+         Mantener array directo porque el front
+         UltimaVentaLocal espera:
+         
+         const d = await r.json();
+         d.sort(...)
+      ===================================================== */
+
+      return res.json(data);
+
+    } catch (err) {
+
+      console.error(
+        "Error consultando estado horario:",
+        err
+      );
+
+      return res.status(500).json({
+        message:
+          "Error consultando horarios"
+      });
+    }
   }
-});
+);
 
 router.get("/estado-horario/resumen",  async (req, res) => {
   try {

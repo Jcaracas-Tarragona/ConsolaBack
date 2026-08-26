@@ -1,7 +1,7 @@
 import express from "express";
 import { enviarCorreoAlerta } from "../services/mailService.js";
 import mgmtDb from "../db/adminDB.js";
-import  {getCentralPool }  from "../db/dbCentral.js";
+import  {getSqlServerPool }  from "../db/dbCentral.js";
 const router = express.Router();
 
 
@@ -141,8 +141,6 @@ router.get("/estado-equipos", async (req, res) => {
 
 router.get("/estado-horario/resumen", async (req, res) => {
 
-  /* VALIDAR API KEY */
-
   const apiKey = req.headers["x-api-key"];
 
   if (apiKey !== process.env.API_KEY) {
@@ -153,81 +151,409 @@ router.get("/estado-horario/resumen", async (req, res) => {
 
   try {
 
-    const pool = await getCentralPool();
+    /* =====================================================
+       EMPRESA
+    ===================================================== */
 
-    /* CONSULTA */
+    const empresaSeleccionada = Number(req.query.empresa_id);
+
+    if (!empresaSeleccionada) {
+      return res.status(400).json({
+        message: "Debe indicar empresa_id"
+      });
+    }
+
+    const mapaEmpresas = {
+      1: {
+        sqlServer: "QA",
+        empresaInternaId: 2
+      },
+
+      3: {
+        sqlServer: "EMPRESA2",
+        empresaInternaId: 3
+      }
+    };
+
+    const empresaConfig =
+      mapaEmpresas[empresaSeleccionada];
+
+    if (!empresaConfig) {
+      return res.status(400).json({
+        message: "Empresa no soportada para esta consulta"
+      });
+    }
+
+    const {
+      sqlServer,
+      empresaInternaId
+    } = empresaConfig;
+
+
+    /* =====================================================
+       NORMALIZAR CODLOCAL
+    ===================================================== */
+
+    const normalizarCodLocal = (valor) => {
+
+      if (
+        valor === null ||
+        valor === undefined
+      ) {
+        return null;
+      }
+
+      const numero = Number(
+        String(valor).trim()
+      );
+
+      return Number.isFinite(numero)
+        ? numero
+        : null;
+    };
+
+
+    /* =====================================================
+       CONNECTIONS ACTUALES DE LA EMPRESA
+    ===================================================== */
+
+    const conexiones = await mgmtDb("connections")
+      .where(
+        "empresa_id",
+        empresaInternaId
+      )
+      .select(
+        "id",
+        "codLocal",
+        "name",
+        "activo"
+      );
+
+
+    /* =====================================================
+       MAPA CONNECTIONS
+    ===================================================== */
+
+    const mapaConexiones = new Map();
+
+    conexiones.forEach(connection => {
+
+      const codigo =
+        normalizarCodLocal(
+          connection.codLocal
+        );
+
+      if (codigo !== null) {
+        mapaConexiones.set(
+          codigo,
+          connection
+        );
+      }
+
+    });
+
+
+    /* =====================================================
+       SQL SERVER
+    ===================================================== */
+
+    const pool =
+      await getSqlServerPool(
+        sqlServer
+      );
+
+
+    /* =====================================================
+       CONSULTA CENTRAL
+       
+       Solo traemos actividad de los últimos 30 días.
+       
+       Esto evita considerar locales históricos
+       cerrados hace meses o años.
+    ===================================================== */
 
     const result = await pool.request().query(`
-      SELECT e.Local AS codLocal, l.Nom_local,
+      SELECT
+        e.Local AS codLocal,
+        l.Nom_local,
+
         CASE
           WHEN MAX(e.fecha) < CAST(GETDATE() AS DATE)
             THEN 'Sin ventas hoy'
+
           WHEN DATEDIFF(
             MINUTE,
             MAX(
               DATEADD(
                 SECOND,
-                DATEDIFF(SECOND,'00:00:00',e.hora),
+                DATEDIFF(
+                  SECOND,
+                  '00:00:00',
+                  e.hora
+                ),
                 CAST(e.fecha AS DATETIME)
               )
             ),
             GETDATE()
           ) <= 10
             THEN 'En horario'
+
           WHEN DATEDIFF(
             MINUTE,
             MAX(
               DATEADD(
                 SECOND,
-                DATEDIFF(SECOND,'00:00:00',e.hora),
+                DATEDIFF(
+                  SECOND,
+                  '00:00:00',
+                  e.hora
+                ),
                 CAST(e.fecha AS DATETIME)
               )
             ),
             GETDATE()
           ) BETWEEN 11 AND 59
             THEN 'Demora leve'
+
           ELSE 'Critica'
+
         END AS estado
 
-      FROM emitidos e LEFT JOIN locales l ON e.Local = l.Num_local
-      WHERE e.anulado = 0 
-      GROUP BY e.Local, l.Nom_local
-      ORDER BY
-        estado,
+      FROM emitidos e
+
+      LEFT JOIN locales l
+        ON e.Local = l.Num_local
+
+      WHERE e.anulado = 0
+
+      GROUP BY
+        e.Local,
         l.Nom_local
+
+      HAVING
+        MAX(e.fecha) >= DATEADD(
+          DAY,
+          -30,
+          CAST(GETDATE() AS DATE)
+        )
+
+      ORDER BY
+        e.Local;
     `);
 
-    
-    let data = result.recordset;
-    
-    /* VALIDAR LOCALES CERRADOS  */
-    const diaSemana = obtenerDiaSemana();
 
-    const localesSinVentas = data
-      .filter(x => x.estado === "Sin ventas hoy")
-      .map(x => String(x.codLocal));
+    let data =
+      result.recordset || [];
 
-    if (localesSinVentas.length > 0) {
 
-      const horarios = await mgmtDb("local_horarios_base")
-        .select("codlocal")
-        .where({
-          dia_semana: diaSemana,
-          activo: true,
-          cerrado: true
-        })
-        .whereIn("codlocal", localesSinVentas);
-        
+    /* =====================================================
+       SOLO LOCALES QUE EXISTEN ACTUALMENTE EN CONNECTIONS
+    =====================================================
+       
+       connections define qué locales forman parte
+       actualmente de la empresa.
+       
+       Esto elimina locales históricos del central.
+    ===================================================== */
 
-      const localesCerrados = new Set(
-        horarios.map(h => String(h.codlocal))
+    data = data
+      .filter(item => {
+
+        const codigo =
+          normalizarCodLocal(
+            item.codLocal
+          );
+
+        return mapaConexiones.has(
+          codigo
+        );
+
+      })
+      .map(item => {
+
+        const codigo =
+          normalizarCodLocal(
+            item.codLocal
+          );
+
+        const connection =
+          mapaConexiones.get(
+            codigo
+          );
+
+        return {
+          ...item,
+
+          codLocal:
+            codigo,
+
+          connection_id:
+            connection.id,
+
+          Nom_local:
+            connection.name ||
+            item.Nom_local,
+
+          activo:
+            connection.activo
+        };
+
+      });
+
+
+    /* =====================================================
+       LOCALES INACTIVOS = CERRADO
+    ===================================================== */
+
+    data = data.map(local => {
+
+      if (local.activo === false) {
+
+        return {
+          ...local,
+          estado: "Cerrado"
+        };
+
+      }
+
+      return local;
+
+    });
+
+
+    /* =====================================================
+       AGREGAR CONNECTIONS QUE NO APARECIERON
+       EN LOS ÚLTIMOS 30 DÍAS
+    =====================================================
+       
+       Si existe en connections:
+       
+       activo   → Sin ventas hoy
+       inactivo → Cerrado
+    ===================================================== */
+
+    const codigosData =
+      new Set(
+        data.map(
+          local =>
+            normalizarCodLocal(
+              local.codLocal
+            )
+        )
       );
+
+
+    conexiones.forEach(connection => {
+
+      const codigo =
+        normalizarCodLocal(
+          connection.codLocal
+        );
+
+      if (
+        codigo === null ||
+        codigosData.has(codigo)
+      ) {
+        return;
+      }
+
+
+      data.push({
+
+        codLocal:
+          codigo,
+
+        Nom_local:
+          connection.name,
+
+        connection_id:
+          connection.id,
+
+        activo:
+          connection.activo,
+
+        estado:
+          connection.activo
+            ? "Sin ventas hoy"
+            : "Cerrado"
+
+      });
+
+    });
+
+
+    /* =====================================================
+       VALIDAR HORARIOS CERRADOS
+    ===================================================== */
+
+    const diaSemana =
+      obtenerDiaSemana();
+
+
+    const conexionesSinVentas =
+      data
+        .filter(local =>
+          local.estado === "Sin ventas hoy" &&
+          local.activo === true &&
+          local.connection_id !== null
+        )
+        .map(local =>
+          Number(
+            local.connection_id
+          )
+        )
+        .filter(
+          Number.isFinite
+        );
+
+
+    if (
+      conexionesSinVentas.length > 0
+    ) {
+
+      const horarios =
+        await mgmtDb(
+          "local_horarios_base"
+        )
+          .select(
+            "connection_id"
+          )
+          .where({
+            dia_semana:
+              diaSemana,
+
+            activo:
+              true,
+
+            cerrado:
+              true
+          })
+          .whereIn(
+            "connection_id",
+            conexionesSinVentas
+          );
+
+
+      const conexionesCerradas =
+        new Set(
+          horarios.map(
+            horario =>
+              Number(
+                horario.connection_id
+              )
+          )
+        );
+
 
       data = data.map(local => {
 
         if (
           local.estado === "Sin ventas hoy" &&
-          localesCerrados.has(String(local.codLocal))
+          conexionesCerradas.has(
+            Number(
+              local.connection_id
+            )
+          )
         ) {
 
           return {
@@ -243,44 +569,128 @@ router.get("/estado-horario/resumen", async (req, res) => {
 
     }
 
-    /* ALERTAS */
-    const alertas = data.filter(x =>
-      x.estado === "Critica" ||
-      x.estado === "Sin ventas hoy"
+
+    /* =====================================================
+       ALERTAS
+    ===================================================== */
+
+    const alertas = data.filter(
+      item =>
+        item.estado === "Critica" ||
+        item.estado === "Sin ventas hoy"
     );
 
-    /* RESUMEN PARA DASHBOARD */
+
+    /* =====================================================
+       RESUMEN
+    ===================================================== */
 
     const resumen = Object.values(
       data.reduce((acc, item) => {
+
         if (!acc[item.estado]) {
+
           acc[item.estado] = {
-            estado: item.estado,
-            cantidad: 0
+            estado:
+              item.estado,
+
+            cantidad:
+              0
           };
+
         }
 
         acc[item.estado].cantidad++;
+
         return acc;
+
       }, {})
     );
-    
 
-    /* RESPUESTA API */
 
-    res.json({
-      total: data.length,
-      alertas: alertas.length,
+    /* =====================================================
+       ORDEN
+    ===================================================== */
+
+    const prioridad = {
+      "Sin ventas hoy": 1,
+      "Critica": 2,
+      "Demora leve": 3,
+      "En horario": 4,
+      "Cerrado": 5
+    };
+
+
+    data.sort((a, b) => {
+
+      const prioridadA =
+        prioridad[a.estado] ?? 99;
+
+      const prioridadB =
+        prioridad[b.estado] ?? 99;
+
+
+      if (
+        prioridadA !==
+        prioridadB
+      ) {
+
+        return (
+          prioridadA -
+          prioridadB
+        );
+
+      }
+
+
+      return (
+        Number(a.codLocal) -
+        Number(b.codLocal)
+      );
+
+    });
+
+
+    /* =====================================================
+       RESPUESTA
+    ===================================================== */
+
+    return res.json({
+
+      empresa_id:
+        empresaSeleccionada,
+
+      empresa_interna_id:
+        empresaInternaId,
+
+      empresa:
+        sqlServer,
+
+      total:
+        data.length,
+
+      alertas:
+        alertas.length,
+
       resumen,
+
       data
 
     });
 
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      message: "Error generando resumen de estados"
+
+    console.error(
+      "Error generando resumen estado horario:",
+      err
+    );
+
+    return res.status(500).json({
+      message:
+        "Error generando resumen de estados"
     });
+
   }
 
 });
