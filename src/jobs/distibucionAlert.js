@@ -35,9 +35,7 @@ const EMPRESAS = [
 
 async function consultarEmpresa(empresa) {
 
-  const url =
-    `http://localhost:3000/actualizaciones/estado-horario/resumen` +
-    `?empresa_id=${empresa.id}`;
+  const url = `http://localhost:3000/actualizaciones/estado-horario/resumen` + `?empresa_id=${empresa.id}`;
 
   const res = await fetch(url, {
     headers: {

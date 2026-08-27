@@ -610,17 +610,25 @@ router.get(
       return res.json(data);
 
     } catch (err) {
+        console.error(
+          "Error consultando estado horario:",
+          err.message
+        );
 
-      console.error(
-        "Error consultando estado horario:",
-        err
-      );
+        if (
+          err.code === "ESOCKET" ||
+          err.code === "ETIMEOUT" ||
+          err.code === "ECONNCLOSED"
+        ) {
+          return res.status(503).json({
+            message: "No fue posible conectar con el servidor central de la empresa."
+          });
+        }
 
-      return res.status(500).json({
-        message:
-          "Error consultando horarios"
-      });
-    }
+        return res.status(500).json({
+          message: "Error consultando horarios"
+        });
+      }
   }
 );
 

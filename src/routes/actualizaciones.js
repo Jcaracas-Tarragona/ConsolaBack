@@ -69,13 +69,7 @@ router.post("/", async (req, res) => {
     /* =========================
        INSERT BD
     ========================== */
-    await mgmtDb("actualizaciones").insert({
-      equipo,
-      modulo,
-      estado,
-      fecha: fechaParseada,
-      ip: req.ip
-    });
+    await mgmtDb("actualizaciones").insert({ equipo, modulo, estado, fecha: fechaParseada, ip: req.ip });
 
     res.json({
       ok: true,
@@ -97,16 +91,9 @@ router.post("/", async (req, res) => {
 router.get("/estado-equipos", async (req, res) => {
   try {
 
-    const result = await mgmtDb.raw(`
-      SELECT DISTINCT ON (equipo, modulo)
-        equipo,
-        modulo,
-        estado,
-        fecha,
-        ip
-      FROM actualizaciones
-      ORDER BY equipo, modulo, fecha DESC
-    `);
+    const result = await mgmtDb.raw(`SELECT DISTINCT ON (equipo, modulo)
+      equipo, modulo, estado, fecha, ip FROM actualizaciones
+      ORDER BY equipo, modulo, fecha DESC`);
 
     const rows = result.rows;
 
@@ -213,70 +200,41 @@ router.get("/estado-horario/resumen", async (req, res) => {
     };
 
 
-    /* =====================================================
-       CONNECTIONS ACTUALES DE LA EMPRESA
-    ===================================================== */
+    /* CONNECTIONS ACTUALES DE LA EMPRESA */
 
     const conexiones = await mgmtDb("connections")
-      .where(
-        "empresa_id",
-        empresaInternaId
-      )
-      .select(
-        "id",
-        "codLocal",
-        "name",
-        "activo"
-      );
+      .where("empresa_id", empresaInternaId )
+      .select("id", "codLocal", "name", "activo");
 
 
-    /* =====================================================
-       MAPA CONNECTIONS
-    ===================================================== */
+    /*  MAPA CONNECTIONS */
 
     const mapaConexiones = new Map();
 
     conexiones.forEach(connection => {
 
-      const codigo =
-        normalizarCodLocal(
-          connection.codLocal
-        );
+      const codigo = normalizarCodLocal(connection.codLocal);
 
       if (codigo !== null) {
         mapaConexiones.set(
-          codigo,
-          connection
-        );
+          codigo, connection);
       }
 
     });
 
 
-    /* =====================================================
-       SQL SERVER
-    ===================================================== */
+    /*  SQL SERVER  */
 
-    const pool =
-      await getSqlServerPool(
-        sqlServer
-      );
+    const pool = await getSqlServerPool( sqlServer );
 
 
-    /* =====================================================
-       CONSULTA CENTRAL
-       
-       Solo traemos actividad de los últimos 30 días.
-       
+    /*  CONSULTA CENTRAL      
+       Solo traemos actividad de los últimos 30 días.       
        Esto evita considerar locales históricos
-       cerrados hace meses o años.
-    ===================================================== */
+       cerrados hace meses o años. */
 
     const result = await pool.request().query(`
-      SELECT
-        e.Local AS codLocal,
-        l.Nom_local,
-
+      SELECT e.Local AS codLocal, l.Nom_local,
         CASE
           WHEN MAX(e.fecha) < CAST(GETDATE() AS DATE)
             THEN 'Sin ventas hoy'
@@ -346,76 +304,41 @@ router.get("/estado-horario/resumen", async (req, res) => {
       result.recordset || [];
 
 
-    /* =====================================================
-       SOLO LOCALES QUE EXISTEN ACTUALMENTE EN CONNECTIONS
-    =====================================================
-       
+    /* SOLO LOCALES QUE EXISTEN ACTUALMENTE EN CONNECTIONS
        connections define qué locales forman parte
        actualmente de la empresa.
        
-       Esto elimina locales históricos del central.
-    ===================================================== */
+       Esto elimina locales históricos del central. */
 
     data = data
       .filter(item => {
-
-        const codigo =
-          normalizarCodLocal(
-            item.codLocal
-          );
-
-        return mapaConexiones.has(
-          codigo
-        );
-
+        const codigo = normalizarCodLocal(item.codLocal);
+        return mapaConexiones.has(codigo);
       })
       .map(item => {
-
-        const codigo =
-          normalizarCodLocal(
-            item.codLocal
-          );
-
-        const connection =
-          mapaConexiones.get(
-            codigo
-          );
+        const codigo = normalizarCodLocal( item.codLocal );
+        const connection = mapaConexiones.get( codigo );
 
         return {
           ...item,
-
-          codLocal:
-            codigo,
-
-          connection_id:
-            connection.id,
-
-          Nom_local:
-            connection.name ||
-            item.Nom_local,
-
-          activo:
-            connection.activo
+          codLocal: codigo,
+          connection_id: connection.id,
+          Nom_local: connection.name || item.Nom_local,
+          activo: connection.activo
         };
 
       });
 
 
-    /* =====================================================
-       LOCALES INACTIVOS = CERRADO
-    ===================================================== */
+    /* LOCALES INACTIVOS = CERRADO */
 
     data = data.map(local => {
-
       if (local.activo === false) {
-
         return {
           ...local,
           estado: "Cerrado"
         };
-
       }
-
       return local;
 
     });
@@ -444,12 +367,7 @@ router.get("/estado-horario/resumen", async (req, res) => {
 
 
     conexiones.forEach(connection => {
-
-      const codigo =
-        normalizarCodLocal(
-          connection.codLocal
-        );
-
+      const codigo = normalizarCodLocal( connection.codLocal );
       if (
         codigo === null ||
         codigosData.has(codigo)
@@ -457,91 +375,44 @@ router.get("/estado-horario/resumen", async (req, res) => {
         return;
       }
 
-
       data.push({
-
-        codLocal:
-          codigo,
-
-        Nom_local:
-          connection.name,
-
-        connection_id:
-          connection.id,
-
-        activo:
-          connection.activo,
-
-        estado:
-          connection.activo
-            ? "Sin ventas hoy"
-            : "Cerrado"
-
+        codLocal: codigo,
+        Nom_local: connection.name,
+        connection_id: connection.id,
+        activo: connection.activo,
+        estado: connection.activo ? "Sin ventas hoy" : "Cerrado"
       });
 
     });
 
 
-    /* =====================================================
-       VALIDAR HORARIOS CERRADOS
-    ===================================================== */
-
-    const diaSemana =
-      obtenerDiaSemana();
-
-
+    /*  VALIDAR HORARIOS CERRADOS  */
+    const diaSemana = obtenerDiaSemana();
     const conexionesSinVentas =
       data
         .filter(local =>
           local.estado === "Sin ventas hoy" &&
           local.activo === true &&
-          local.connection_id !== null
-        )
-        .map(local =>
-          Number(
-            local.connection_id
-          )
-        )
-        .filter(
-          Number.isFinite
-        );
+          local.connection_id !== null )
+        .map(local =>Number(local.connection_id))
+        .filter(Number.isFinite);
 
 
-    if (
-      conexionesSinVentas.length > 0
-    ) {
-
+    if ( conexionesSinVentas.length > 0 ) {
       const horarios =
-        await mgmtDb(
-          "local_horarios_base"
-        )
-          .select(
-            "connection_id"
-          )
+        await mgmtDb("local_horarios_base")
+          .select("connection_id")
           .where({
-            dia_semana:
-              diaSemana,
-
-            activo:
-              true,
-
-            cerrado:
-              true
-          })
-          .whereIn(
-            "connection_id",
-            conexionesSinVentas
-          );
+            dia_semana: diaSemana,
+            activo:true,
+            cerrado:true })
+          .whereIn("connection_id",conexionesSinVentas);
 
 
       const conexionesCerradas =
         new Set(
           horarios.map(
-            horario =>
-              Number(
-                horario.connection_id
-              )
-          )
+            horario =>Number(horario.connection_id))
         );
 
 
@@ -549,12 +420,7 @@ router.get("/estado-horario/resumen", async (req, res) => {
 
         if (
           local.estado === "Sin ventas hoy" &&
-          conexionesCerradas.has(
-            Number(
-              local.connection_id
-            )
-          )
-        ) {
+          conexionesCerradas.has( Number(local.connection_id) ) ) {
 
           return {
             ...local,
@@ -562,17 +428,11 @@ router.get("/estado-horario/resumen", async (req, res) => {
           };
 
         }
-
         return local;
-
       });
-
     }
 
-
-    /* =====================================================
-       ALERTAS
-    ===================================================== */
+    /*   ALERTAS  */
 
     const alertas = data.filter(
       item =>
@@ -581,25 +441,17 @@ router.get("/estado-horario/resumen", async (req, res) => {
     );
 
 
-    /* =====================================================
-       RESUMEN
-    ===================================================== */
+    /*  RESUMEN  */
 
     const resumen = Object.values(
       data.reduce((acc, item) => {
 
         if (!acc[item.estado]) {
-
           acc[item.estado] = {
-            estado:
-              item.estado,
-
-            cantidad:
-              0
+            estado: item.estado,
+            cantidad: 0
           };
-
         }
-
         acc[item.estado].cantidad++;
 
         return acc;
@@ -608,9 +460,7 @@ router.get("/estado-horario/resumen", async (req, res) => {
     );
 
 
-    /* =====================================================
-       ORDEN
-    ===================================================== */
+    /* ORDEN */
 
     const prioridad = {
       "Sin ventas hoy": 1,
@@ -623,76 +473,37 @@ router.get("/estado-horario/resumen", async (req, res) => {
 
     data.sort((a, b) => {
 
-      const prioridadA =
-        prioridad[a.estado] ?? 99;
+      const prioridadA = prioridad[a.estado] ?? 99;
+      const prioridadB = prioridad[b.estado] ?? 99;
 
-      const prioridadB =
-        prioridad[b.estado] ?? 99;
-
-
-      if (
-        prioridadA !==
-        prioridadB
-      ) {
-
-        return (
-          prioridadA -
-          prioridadB
-        );
-
+      if ( prioridadA !== prioridadB ) {
+        return ( prioridadA - prioridadB );
       }
 
 
-      return (
-        Number(a.codLocal) -
-        Number(b.codLocal)
-      );
-
+      return ( Number(a.codLocal) - Number(b.codLocal) );
     });
 
 
-    /* =====================================================
-       RESPUESTA
-    ===================================================== */
+    /* RESPUESTA */
 
     return res.json({
-
-      empresa_id:
-        empresaSeleccionada,
-
-      empresa_interna_id:
-        empresaInternaId,
-
-      empresa:
-        sqlServer,
-
-      total:
-        data.length,
-
-      alertas:
-        alertas.length,
-
+      empresa_id: empresaSeleccionada,
+      empresa_interna_id: empresaInternaId,
+      empresa: sqlServer,
+      total: data.length,
+      alertas: alertas.length,
       resumen,
-
       data
-
     });
-
-
   } catch (err) {
-
     console.error(
-      "Error generando resumen estado horario:",
-      err
+      "Error generando resumen estado horario:",err
     );
 
     return res.status(500).json({
-      message:
-        "Error generando resumen de estados"
-    });
-
+      message: "Error generando resumen de estados" });
   }
-
 });
 
 
