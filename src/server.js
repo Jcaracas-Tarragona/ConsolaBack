@@ -24,19 +24,23 @@ import scheduledTasksRouter from "./routes/scheduledTasks.js";
 import vendedoresRouter from "./routes/vendedores.js";
 import empresasRouter from "./routes/empresas.js";
 import totemsRouter from "./routes/totems.js";
+import gestionesRoutes from "./routes/gestiones.js";
+import estadosRoutes from "./routes/estados.js";
 
 
 //import startDailyAlert from "./jobs/dailyAlert.js";
-import "./jobs/fixOfflineUpdatesJob.js";
+//import "./jobs/fixOfflineUpdatesJob.js";
 import { initCronJobs } from "./jobs/distibucionAlert.js";
 import { initScheduledTaskJob } from "./jobs/scheduledTaskJob.js";
-import { tareaCodigosQuemables } from "./jobs/tareaCodigosQuemables.js"
+import { tareaCodigosQuemables } from "./jobs/tareaCodigosQuemables.js";
 import { totemsStatusJob } from "./jobs/totemsStatusJob.js";
+import { iniciarVendedorScheduler } from "./jobs/vendedorScheduler.js";
 
-initScheduledTaskJob();
-initCronJobs();
-tareaCodigosQuemables();
-totemsStatusJob();
+//initScheduledTaskJob();
+//initCronJobs();
+//tareaCodigosQuemables();
+//totemsStatusJob();
+iniciarVendedorScheduler();
 
 // Create server
 const app = express();
@@ -74,7 +78,7 @@ app.use("/auth", authRouter);
 
 // ✅ SPA fallback (debe ir al final, después de todas las rutas)
 if (serveFrontend) {
-  app.get(/^(?!\/(auth|connections|query|logs|users|reports|menu-locales|articulos|horarios-base|horarios-especiales|ventas|actualizaciones|notificaciones|scheduled-tasks | vendedores | empresas | totems )).*/, (req, res, next) => {
+  app.get(/^(?!\/(auth|connections|query|logs|users|reports|menu-locales|articulos|horarios-base|horarios-especiales|ventas|actualizaciones|notificaciones|scheduled-tasks | vendedores | empresas | totems | gestiones | estados )).*/, (req, res, next) => {
     // Excluir rutas API del backend
     if (
       req.originalUrl.startsWith("/auth") ||
@@ -93,7 +97,9 @@ if (serveFrontend) {
       req.originalUrl.startsWith("/scheduled-tasks") ||
       req.originalUrl.startsWith("/vendedores") ||
       req.originalUrl.startsWith("/empresas") ||
-      req.originalUrl.startsWith("/totems")
+      req.originalUrl.startsWith("/totems") ||
+      req.originalUrl.startsWith("/gestiones") ||
+      req.originalUrl.startsWith("/estados")
     ) {
       return next();
     }
@@ -120,8 +126,8 @@ app.use("/scheduled-tasks", scheduledTasksRouter);
 app.use("/vendedores",vendedoresRouter)
 app.use("/empresas",empresasRouter)
 app.use("/totems",totemsRouter)
-
-
+app.use("/gestiones",gestionesRoutes)
+app.use("/estados",estadosRoutes)
 
 // Cron jobs
 //startDailyAlert();

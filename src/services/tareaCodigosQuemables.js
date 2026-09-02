@@ -100,9 +100,11 @@ async function ejecutarTareaCodigosQuemables() {
 
       await enviarCorreoAlerta({
         to: usuario.email,
+        bcc: "auditoria@empresa.cl",
         subject: "Asignación de códigos de descuento",
         html,
-        usarCc: false
+        usarCc: false,
+        usarBcc: true
       });
 
     }
