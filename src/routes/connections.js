@@ -3,8 +3,9 @@ import express from "express";
 import mgmtDb from "../db/adminDb.js";
 import sql from "mssql";
 import { requireAuth } from "../middleware/auth.js";
-
 import { getConnectionById } from "../db/connections.js";
+import { allowRoles } from "../middleware/roleMiddleware.js";
+
 
 const router = express.Router();
 
@@ -317,6 +318,232 @@ router.post("/asignar-locales", async (req, res) => {
     res.status(500).json({ message: 'Error asignando locales' });
   }
 });
+
+
+router.get("/:connectionId/vendedor/:rut", allowRoles("Admin", "N2"), async (req, res) => {
+  const { connectionId, rut } = req.params;
+  let pool;
+
+  try {
+    const connConfig = await getConnectionById(connectionId);
+
+    if (!connConfig) {
+      return res.status(404).json({
+        success: false,
+        message: "Conexión no encontrada en BD interna"
+      });
+    }
+
+    const cuil = String(rut || "").trim().toUpperCase();
+
+    if (!cuil) {
+      return res.status(400).json({
+        success: false,
+        message: "Debe ingresar un RUT."
+      });
+    }
+
+    const config = {
+      user: process.env.DB_USER,
+      password: process.env.DB_PASS,
+      database: process.env.DB_NAME,
+      server: connConfig.host,
+      options: {
+        encrypt: false,
+        trustServerCertificate: true,
+        connectTimeout: 5000
+      }
+    };
+
+    pool = new sql.ConnectionPool(config);
+    await pool.connect();
+
+    const result = await pool
+      .request()
+      .input("cuil", sql.VarChar(20), cuil)
+      .query(`
+        SELECT
+          vendedor,
+          nombre,
+          puesto,
+          cuil,
+          debaja,
+          inhab
+        FROM vendedor
+        WHERE UPPER(RTRIM(cuil)) = @cuil
+      `);
+
+    const vendedor = result.recordset?.[0];
+
+    if (!vendedor) {
+      return res.status(404).json({
+        success: false,
+        message: "El RUT no fue encontrado en el local seleccionado."
+      });
+    }
+
+    return res.json({
+      success: true,
+      vendedor: Number(vendedor.vendedor),
+      nombre: vendedor.nombre?.trim() || "",
+      puesto: vendedor.puesto?.trim() || "",
+      cuil: vendedor.cuil?.trim().toUpperCase() || "",
+      debaja: Number(vendedor.debaja || 0),
+      inhab: Number(vendedor.inhab || 0)
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: `Error al consultar vendedor: ${err.message}`
+    });
+  } finally {
+    if (pool) {
+      try {
+        await pool.close();
+      } catch {}
+    }
+  }
+});
+
+router.put("/:connectionId/vendedor/:rut", allowRoles("Admin", "N2"), async (req, res) => {
+  const { connectionId, rut } = req.params;
+  const { vendedor, puesto, estado } = req.body;
+  let pool;
+
+  try {
+    const connConfig = await getConnectionById(connectionId);
+
+    if (!connConfig) {
+      return res.status(404).json({
+        success: false,
+        message: "Conexión no encontrada en BD interna"
+      });
+    }
+
+    const cuil = String(rut || "").trim().toUpperCase();
+    const puestoNormalizado = String(puesto || "").trim().toUpperCase();
+    const estadoNormalizado = String(estado || "").trim().toUpperCase();
+
+    if (!cuil) {
+      return res.status(400).json({
+        success: false,
+        message: "Debe indicar un RUT."
+      });
+    }
+
+    if (!["CAJERO", "GERENTE"].includes(puestoNormalizado)) {
+      return res.status(400).json({
+        success: false,
+        message: "El puesto seleccionado no es válido."
+      });
+    }
+
+    if (!["ACTIVO", "INACTIVO"].includes(estadoNormalizado)) {
+      return res.status(400).json({
+        success: false,
+        message: "El estado seleccionado no es válido."
+      });
+    }
+
+    const config = {
+      user: process.env.DB_USER,
+      password: process.env.DB_PASS,
+      database: process.env.DB_NAME,
+      server: connConfig.host,
+      options: {
+        encrypt: false,
+        trustServerCertificate: true,
+        connectTimeout: 5000
+      }
+    };
+
+    pool = new sql.ConnectionPool(config);
+    await pool.connect();
+
+    const actual = await pool
+      .request()
+      .input("vendedor", sql.Int, Number(vendedor))
+      .input("cuil", sql.VarChar(20), cuil)
+      .query(`
+        SELECT
+          vendedor,
+          nombre,
+          puesto,
+          cuil,
+          debaja,
+          inhab
+        FROM vendedor
+        WHERE vendedor = @vendedor
+          AND UPPER(RTRIM(cuil)) = @cuil
+      `);
+
+    const registro = actual.recordset?.[0];
+
+    if (!registro) {
+      return res.status(404).json({
+        success: false,
+        message: "El vendedor ya no coincide con la información consultada."
+      });
+    }
+
+    const debaja = estadoNormalizado === "ACTIVO" ? 0 : 1;
+    const inhab = estadoNormalizado === "ACTIVO" ? 0 : 1;
+
+    const result = await pool
+      .request()
+      .input("vendedor", sql.Int, Number(vendedor))
+      .input("cuil", sql.VarChar(20), cuil)
+      .input("puesto", sql.VarChar(30), puestoNormalizado)
+      .input("debaja", sql.Int, debaja)
+      .input("inhab", sql.Int, inhab)
+      .query(` UPDATE vendedor SET
+          puesto = @puesto,
+          debaja = @debaja,
+          inhab = @inhab
+        WHERE vendedor = @vendedor
+          AND UPPER(RTRIM(cuil)) = @cuil
+      `);
+
+    if (!result.rowsAffected?.[0]) {
+      return res.status(409).json({
+        success: false,
+        message: "No se realizaron cambios en el vendedor."
+      });
+    }
+
+    await mgmtDb("notificaciones").insert({
+      titulo: "Modificación de vendedor",
+      contenido: `RUT ${cuil} - Cambio Puesto a ${puestoNormalizado} - En Local ${connConfig.name}.`,
+      leido: false,
+      url: "vendedores",
+      created_at: new Date()
+    });
+
+    return res.json({
+      success: true,
+      vendedor: Number(vendedor),
+      cuil,
+      nombre: registro.nombre?.trim() || "",
+      puesto: puestoNormalizado,
+      estado: estadoNormalizado,
+      debaja,
+      inhab,
+      message: "Vendedor actualizado correctamente."
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: `Error al actualizar vendedor: ${err.message}`
+    });
+  } finally {
+    if (pool) {
+      try {
+        await pool.close();
+      } catch {}
+    }
+  }
+});
+
 
 /* HELPERS*/
 function normalizarBody(body) {

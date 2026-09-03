@@ -4,7 +4,7 @@ import { allowRoles } from "../middleware/roleMiddleware.js";
 
 const router = express.Router();
 
-router.put("/leido/:id", allowRoles("Admin"), async (req, res) => {
+router.put("/leido/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
     
@@ -28,7 +28,7 @@ router.put("/leido/:id", allowRoles("Admin"), async (req, res) => {
   }
 });
 
-router.get("/", allowRoles("Admin"), async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const data = await mgmtDb("notificaciones")
       .where({ leido: false })
@@ -40,6 +40,34 @@ router.get("/", allowRoles("Admin"), async (req, res) => {
   }
 });
 
+router.get("/url", async (req, res) => {
+  try {
+    const { url, leido } = req.query;
 
+    const query = mgmtDb("notificaciones")
+      .select("id","titulo","contenido","leido","created_at","url")
+      .orderBy("created_at", "desc");
+
+    if (url) {
+      query.where("url", url);
+    }
+
+    if (leido !== undefined) {
+      query.where("leido", leido === "true");
+    }
+
+    const notificaciones = await query;
+
+    return res.json({
+      success: true,
+      notificaciones
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener las notificaciones."
+    });
+  }
+});
 
 export default router;
