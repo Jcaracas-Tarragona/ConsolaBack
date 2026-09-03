@@ -22,7 +22,7 @@ let ultimaEjecucion = null;
 export function totemsStatusJob() {
 
   cron.schedule(
-    "*/10 10-20 * * *",
+    "*/10 11-20 * * *",
     async () => {
 
       const ahora = new Date();
